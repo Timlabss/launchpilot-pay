@@ -14,13 +14,12 @@ jobs:
           python-version: "3.12"
       - name: install
         run: |
-          pip install -q playwright playwright-stealth
+          pip install -q playwright
+          pip install playwright-stealth || echo "STEALTH-INSTALL-FAILED"
+          python -c "from playwright_stealth import Stealth; print('stealth import OK')" || echo "STEALTH-IMPORT-FAILED"
           python -m playwright install --with-deps chromium
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
-      - name: probe headless+click
-        run: python3 -u probe2.py headless > /tmp/log1.txt 2>&1 || true
-      - name: probe headful+xvfb
-        run: xvfb-run -a python3 -u probe2.py headful > /tmp/log2.txt 2>&1 || true
+      - name: probe
+        run: python3 -u probe3.py > /tmp/log3.txt 2>&1 || true
       - name: save results
         if: always()
         env:
@@ -48,8 +47,7 @@ jobs:
                 -d "{\"message\":\"probe\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "$NAME create http=%{http_code}\n"
             fi
           }
-          { echo "=== HEADLESS ==="; cat /tmp/log1.txt; echo; echo "=== HEADFUL ==="; cat /tmp/log2.txt; } > /tmp/combined.txt
-          save_file "ph-probe-log.txt" /tmp/combined.txt
-          save_file "ph-shot-headless.b64" /tmp/shot_headless.png
-          save_file "ph-shot-headful.b64" /tmp/shot_headful.png
-          cat /tmp/combined.txt
+          save_file "ph-probe-log.txt" /tmp/log3.txt
+          save_file "ph-shot-headless.b64" /tmp/shot3_home.png
+          save_file "ph-shot-headful.b64" /tmp/shot3_login.png
+          cat /tmp/log3.txt
