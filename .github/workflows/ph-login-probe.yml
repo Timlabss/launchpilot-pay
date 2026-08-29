@@ -1,0 +1,44 @@
+name: ph-login-probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: |
+          pip install -q playwright playwright-stealth
+          python -m playwright install --with-deps chromium
+      - name: login probe
+        env:
+          PH_EMAIL: ${{ secrets.PH_PROBE_EMAIL }}
+          PH_PASS: ${{ secrets.PH_PROBE_PASS }}
+        run: |
+          python3 -u ph_probe.py > /tmp/probe_log.txt 2>&1 || true
+          echo "----- LOG -----"
+          cat /tmp/probe_log.txt
+      - name: save result
+        if: always()
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          if [ -s /tmp/probe_log.txt ]; then
+            B64=$(base64 -w0 /tmp/probe_log.txt)
+            curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/ph-probe-log.txt" \
+              -d "{\"message\":\"ph probe log\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "log http=%{http_code}\n"
+          fi
+          SHOT=$(ls -t /tmp/shot_*.png 2>/dev/null | head -1)
+          if [ -n "$SHOT" ] && [ -s "$SHOT" ]; then
+            B64=$(base64 -w0 "$SHOT")
+            curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/ph-shot.b64" \
+              -d "{\"message\":\"ph probe shot\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "shot http=%{http_code}\n"
+          fi
