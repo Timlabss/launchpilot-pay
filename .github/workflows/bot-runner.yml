@@ -1,0 +1,77 @@
+name: bot-runner
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bot-runner
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install deps
+        run: pip install -q aiogram httpx beautifulsoup4
+
+      - name: load offset (state branch)
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/offset.txt?ref=state" \
+            | python3 -c "
+          import sys, json, base64
+          try:
+              j = json.load(sys.stdin)
+              print(base64.b64decode(j['content']).decode().strip(), end='')
+          except Exception:
+              pass
+          " > state_offset.txt
+          echo "offset: $(cat state_offset.txt 2>/dev/null || echo fresh)"
+
+      - name: run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PH_API_KEY: ${{ secrets.PH_API_KEY }}
+          PH_API_SECRET: ${{ secrets.PH_API_SECRET }}
+        run: python3 -u bot.py
+
+      - name: save offset
+        if: always()
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          if [ ! -s state_offset.txt ]; then echo "no offset file, skip"; exit 0; fi
+          B64=$(base64 -w0 state_offset.txt)
+          RESP=$(curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/offset.txt?ref=state")
+          SHA=$(echo "$RESP" | python3 -c "
+          import sys, json
+          try: print(json.load(sys.stdin).get('sha',''))
+          except Exception: pass
+          ")
+          if [ -n "$SHA" ]; then
+            curl -s -o /dev/null -w "offset saved (update) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/offset.txt" \
+              -d "{\"message\":\"bot offset\",\"content\":\"$B64\",\"branch\":\"state\",\"sha\":\"$SHA\"}"
+          else
+            curl -s -o /dev/null -w "offset saved (create branch) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/offset.txt" \
+              -d "{\"message\":\"bot offset\",\"content\":\"$B64\",\"branch\":\"state\"}"
+          fi
