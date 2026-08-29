@@ -6,10 +6,9 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -17,30 +16,40 @@ jobs:
         run: |
           pip install -q playwright playwright-stealth
           python -m playwright install --with-deps chromium
-      - name: login probe
-        env:
-          PH_EMAIL: ${{ secrets.PH_PROBE_EMAIL }}
-          PH_PASS: ${{ secrets.PH_PROBE_PASS }}
-        run: |
-          python3 -u ph_probe.py > /tmp/probe_log.txt 2>&1 || true
-          echo "----- LOG -----"
-          cat /tmp/probe_log.txt
-      - name: save result
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: probe headless+click
+        run: python3 -u probe2.py headless > /tmp/log1.txt 2>&1 || true
+      - name: probe headful+xvfb
+        run: xvfb-run -a python3 -u probe2.py headful > /tmp/log2.txt 2>&1 || true
+      - name: save results
         if: always()
         env:
           GH: ${{ github.token }}
         run: |
           set +e
-          if [ -s /tmp/probe_log.txt ]; then
-            B64=$(base64 -w0 /tmp/probe_log.txt)
-            curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
-              "https://api.github.com/repos/${{ github.repository }}/contents/state/ph-probe-log.txt" \
-              -d "{\"message\":\"ph probe log\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "log http=%{http_code}\n"
-          fi
-          SHOT=$(ls -t /tmp/shot_*.png 2>/dev/null | head -1)
-          if [ -n "$SHOT" ] && [ -s "$SHOT" ]; then
-            B64=$(base64 -w0 "$SHOT")
-            curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
-              "https://api.github.com/repos/${{ github.repository }}/contents/state/ph-shot.b64" \
-              -d "{\"message\":\"ph probe shot\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "shot http=%{http_code}\n"
-          fi
+          REPO="${{ github.repository }}"
+          save_file() {
+            NAME="$1"; LOCAL="$2"
+            [ -s "$LOCAL" ] || return
+            B64=$(base64 -w0 "$LOCAL")
+            RESP=$(curl -s -H "Authorization: Bearer $GH" "https://api.github.com/repos/$REPO/contents/state/$NAME?ref=state")
+            SHA=$(echo "$RESP" | python3 -c "
+          import sys, json
+          try: print(json.load(sys.stdin).get('sha',''))
+          except Exception: pass
+          ")
+            if [ -n "$SHA" ]; then
+              curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+                "https://api.github.com/repos/$REPO/contents/state/$NAME" \
+                -d "{\"message\":\"probe\",\"content\":\"$B64\",\"branch\":\"state\",\"sha\":\"$SHA\"}" -o /dev/null -w "$NAME update http=%{http_code}\n"
+            else
+              curl -s -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+                "https://api.github.com/repos/$REPO/contents/state/$NAME" \
+                -d "{\"message\":\"probe\",\"content\":\"$B64\",\"branch\":\"state\"}" -o /dev/null -w "$NAME create http=%{http_code}\n"
+            fi
+          }
+          { echo "=== HEADLESS ==="; cat /tmp/log1.txt; echo; echo "=== HEADFUL ==="; cat /tmp/log2.txt; } > /tmp/combined.txt
+          save_file "ph-probe-log.txt" /tmp/combined.txt
+          save_file "ph-shot-headless.b64" /tmp/shot_headless.png
+          save_file "ph-shot-headful.b64" /tmp/shot_headful.png
+          cat /tmp/combined.txt
