@@ -42,6 +42,23 @@ jobs:
           " > state_offset.txt
           echo "offset: $(cat state_offset.txt 2>/dev/null || echo fresh)"
 
+      - name: load dayx state (state branch)
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/dayx.json?ref=state" \
+            | python3 -c "
+          import sys, json, base64
+          try:
+              j = json.load(sys.stdin)
+              print(base64.b64decode(j['content']).decode().strip(), end='')
+          except Exception:
+              pass
+          " > dayx.json
+          echo "dayx.json: $(wc -c < dayx.json 2>/dev/null || echo 0) bytes"
+
       - name: run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -74,4 +91,31 @@ jobs:
               -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
               "https://api.github.com/repos/${{ github.repository }}/contents/state/offset.txt" \
               -d "{\"message\":\"bot offset\",\"content\":\"$B64\",\"branch\":\"state\"}"
+          fi
+
+      - name: save dayx state
+        if: always()
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          if [ ! -s dayx.json ]; then echo "no dayx.json, skip"; exit 0; fi
+          B64=$(base64 -w0 dayx.json)
+          RESP=$(curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/dayx.json?ref=state")
+          SHA=$(echo "$RESP" | python3 -c "
+          import sys, json
+          try: print(json.load(sys.stdin).get('sha',''))
+          except Exception: pass
+          ")
+          if [ -n "$SHA" ]; then
+            curl -s -o /dev/null -w "dayx saved (update) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/dayx.json" \
+              -d "{\"message\":\"dayx state\",\"content\":\"$B64\",\"branch\":\"state\",\"sha\":\"$SHA\"}"
+          else
+            curl -s -o /dev/null -w "dayx saved (create branch) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/dayx.json" \
+              -d "{\"message\":\"dayx state\",\"content\":\"$B64\",\"branch\":\"state\"}"
           fi

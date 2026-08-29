@@ -37,6 +37,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+
+import dayx
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -704,6 +706,95 @@ async def handle_quiz(message: Message) -> None:
         await message.answer(quiz_score(st), reply_markup=MAIN_BUTTONS)
 
 
+# ---------- День X: «комната комментариев» (v0.2.0) ----------
+# Регистрация: /dayx -> клиент шлёт ссылку на запуск -> slug -> API PH.
+# Дальше радар (dayx_poller) живёт сам: новый комментарий -> черновик ответа.
+# ВАЖНО: регистрируем ДО handle_link, иначе ссылка улетит в бесплатную диагностику.
+
+DAYX_WAIT = {}  # chat_id -> True: ждём ссылку на запуск
+
+
+@router.message(F.text.startswith("/dayx"))
+async def cmd_dayx(message: Message) -> None:
+    DAYX_WAIT[message.from_user.id] = True
+    await message.answer(
+        "📡 День X: комната комментариев.\n\n"
+        "Пришли ссылку на свой запуск на Product Hunt (или на страницу продукта):\n"
+        "https://www.producthunt.com/posts/твой-продукт\n\n"
+        "Что будет дальше:\n"
+        "• новый комментарий → я мгновенно пишу ответ за тебя (под твой продукт)\n"
+        "• ты копируешь текст и вставляешь в PH (10 секунд)\n"
+        "• каждые 2 часа — сводка: голоса, комментарии, позиция дня\n"
+        "• конец дня запуска — финальный отчёт + список тех, кто комментировал"
+    )
+
+
+@router.message(F.text.regexp(r"https?://\S+"),
+                lambda m: m.from_user.id in DAYX_WAIT)
+async def handle_dayx_link(message: Message) -> None:
+    uid = message.from_user.id
+    DAYX_WAIT.pop(uid, None)
+    url = re.search(r"https?://\S+", message.text).group(0)
+
+    if "producthunt.com" not in url:
+        await message.answer(
+            "Нужна ссылка именно на Product Hunt (producthunt.com), например:\n"
+            "https://www.producthunt.com/posts/твой-продукт\n\n"
+            "Пришли её — подключу радар."
+        )
+        return
+
+    status = await message.answer("🔎 Нахожу запуск в официальном API Product Hunt...")
+    found, found_slug = None, None
+    async with httpx.AsyncClient(timeout=25) as api_client:
+        for sl in ph_slug_from_url(url):
+            f = await ph_api_lookup(api_client, sl)
+            if f:
+                found, found_slug = f, sl
+                break
+    if not found or not found_slug:
+        await status.edit_text(
+            "Хм, по этой ссылке запуск в API PH не нашёлся.\n\n"
+            "Варианты:\n"
+            "• это coming-soon / запуск ещё не опубликован — пришли ссылку позже, "
+            "когда запуск станет публичным (радар включится сам)\n"
+            "• ссылка не из producthunt.com\n\n"
+            "Пока могу бесплатно проверить страницу: просто пришли её ещё раз "
+            "без /dayx 🙂"
+        )
+        return
+
+    post, comments = await dayx.fetch_launch(found_slug)
+    if post is None:
+        await status.edit_text("Не смог открыть запуск. Проверь ссылку и пришли ещё раз.")
+        return
+
+    state = dayx.load_state()
+    state[found_slug] = {
+        "chat_id": uid,
+        "name": post.get("name"),
+        "tagline": (post.get("tagline") or "")[:200],
+        "seen": [c["id"] for c in comments],
+        "added_at": time.time(),
+        "last_summary": time.time(),
+        "last_wait": time.time(),
+        "seen_live": False,
+        "finished": False,
+    }
+    dayx.save_state(state)
+    live = (post.get("featuredAt") or post.get("createdAt") or "")[:16].replace("T", " ")
+    await status.edit_text(
+        f"✅ «{post.get('name')}» подключён к радару.\n\n"
+        f"Сейчас: {post.get('votesCount')} голосов, {post.get('commentsCount')} комментариев.\n"
+        f"Запуск: {live} UTC.\n\n"
+        "Как работает:\n"
+        "• новый комментарий → я пишу ответ под твой продукт и шлю его сюда\n"
+        "• ты: долгое нажатие → копировать → вставить в поле комментария PH → отправить\n"
+        "• каждые 2 часа — сводка (голоса / комментарии / позиция дня)\n"
+        "• конец дня запуска — финальный отчёт"
+    )
+
+
 @router.message(F.text.regexp(r"https?://\S+"))
 async def handle_link(message: Message) -> None:
     url = re.search(r"https?://\S+", message.text).group(0)
@@ -836,10 +927,11 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     await bot.set_my_commands([
         BotCommand(command="start", description="Старт — бесплатная проверка продукта"),
+        BotCommand(command="dayx", description="День X: радар комментариев запуска"),
     ])
     me = await bot.me()
-    print(f"🤖 Бот @{me.username} запущен (v0.1.5, watchdog): /start -> ссылка -> диагностика",
-          flush=True)
+    print(f"🤖 Бот @{me.username} запущен (v0.2.0, watchdog + радар День X)", flush=True)
+    asyncio.create_task(dayx.dayx_poller(bot))
     await resilient_polling(bot)
 
 
