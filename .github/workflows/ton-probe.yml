@@ -1,0 +1,19 @@
+name: ton-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe TON APIs
+        run: |
+          echo "=== tonapi balance ==="
+          curl -s -m 20 "https://tonapi.io/v2/account/UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk" | head -c 1500
+          echo; echo "=== tonapi tx list ==="
+          curl -s -m 20 "https://tonapi.io/v2/transactions?account=UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk&limit=3" | head -c 4000
+          echo; echo "=== toncenter getAccount ==="
+          curl -s -m 20 "https://toncenter.com/api/v2/getAccount?address=UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk" | head -c 1500
+          echo; echo "=== toncenter getTransactions ==="
+          curl -s -m 20 -X POST "https://toncenter.com/api/v2/getTransactions" -H "Content-Type: application/json" -d '{"address":"UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk","limit":3}' | head -c 4000
+          echo; echo "=== tonapi rate TON/USD ==="
+          curl -s -m 20 "https://tonapi.io/v2/currencies/TON/USD" | head -c 500
+          echo; echo "PROBE DONE"
