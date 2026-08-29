@@ -28,6 +28,7 @@ v0.1.5: собственный поллинг с «watchdog» — бот сам 
 """
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -74,6 +75,85 @@ BROWSER_HEADERS = {
 }
 
 router = Router()
+
+# ---------- юзеры и админка (v0.3.0) ----------
+
+USERS_FILE = Path(__file__).parent / "users.json"
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
+ADMIN_MODE = {}    # admin_uid -> {"mode": "broadcast"|"give"|"take"|"reply", "to": int}
+SUPPORT_WAIT = {}  # user_uid -> True: ждём вопрос поддержки
+
+
+def _load_users() -> dict:
+    try:
+        return json.loads(USERS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_users(users: dict) -> None:
+    try:
+        USERS_FILE.write_text(json.dumps(users, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _touch_user(fu) -> None:
+    """Завести/обновить запись пользователя. Первый в реестре = админ (владелец бота)."""
+    uid = str(fu.id)
+    users = _load_users()
+    is_new = uid not in users
+    e = users.setdefault(uid, {})
+    if is_new:
+        if not any(v.get("admin") for v in users.values()) and not ADMIN_CHAT_ID:
+            e["admin"] = True
+        e["first_seen"] = time.time()
+    e["username"] = fu.username or e.get("username", "")
+    e["name"] = fu.first_name or e.get("name", "")
+    e["last_seen"] = time.time()
+    if ADMIN_CHAT_ID and uid == ADMIN_CHAT_ID:
+        e["admin"] = True
+    _save_users(users)
+
+
+def _is_admin(uid) -> bool:
+    if ADMIN_CHAT_ID and str(uid) == ADMIN_CHAT_ID:
+        return True
+    return bool(_load_users().get(str(uid), {}).get("admin"))
+
+
+def _find_user_ref(ref: str):
+    """'ID' или '@username' -> (uid или None, users)."""
+    users = _load_users()
+    ref = ref.strip().lstrip("@").strip()
+    if ref.isdigit():
+        return (ref if ref in users else None), users
+    low = ref.lower()
+    for uid, e in users.items():
+        if (e.get("username") or "").lower() == low:
+            return uid, users
+    return None, users
+
+
+def _ts(v) -> str:
+    if not v:
+        return "—"
+    d = time.strftime("%d.%m", time.localtime(float(v)))
+    return d
+
+
+def _client_kb(uid) -> InlineKeyboardMarkup:
+    """Главное меню: всё кнопками. Кнопка «Админ» — только у админа."""
+    rows = [
+        [InlineKeyboardButton(text="📡 День X: день запуска", callback_data="dayx")],
+        [InlineKeyboardButton(text="🚀 Подготовить мой запуск — $49", callback_data="prep")],
+        [InlineKeyboardButton(text="📋 Чек-лист", callback_data="checklist"),
+         InlineKeyboardButton(text="❓ Что такое PH", callback_data="what")],
+        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
+    ]
+    if _is_admin(uid):
+        rows.append([InlineKeyboardButton(text="⚙️ Админ", callback_data="admin")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 # ---------- «глаза»: живые слои ----------
 # Слой 0 (для PH): собственная открытая витрина-поиск Product Hunt (Algolia) —
@@ -652,21 +732,22 @@ PREP = f"""💳 Оплата (USDT / карта / Telegram Stars) подключ
 
 NOT_A_LINK = "Я понимаю только ссылки 🙂\nПришлите ссылку на ваш продукт (https://...) или на вашу страницу в Product Hunt — проверю бесплатно."
 
-MAIN_BUTTONS = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🚀 Подготовить мой запуск — $49", callback_data="prep")],
-    [InlineKeyboardButton(text="📋 Чек-лист", callback_data="checklist"),
-     InlineKeyboardButton(text="❓ Что такое PH", callback_data="what")],
-])
+DAYX_INTRO = (
+    "📡 День X: комната комментариев.\n\n"
+    "Пришли ссылку на свой запуск на Product Hunt (или на страницу продукта):\n"
+    "https://www.producthunt.com/posts/твой-продукт\n\n"
+    "Что будет дальше:\n"
+    "• новый комментарий → я мгновенно пишу ответ за тебя (под твой продукт)\n"
+    "• ты копируешь текст и вставляешь в PH (10 секунд)\n"
+    "• каждые 2 часа — сводка: голоса, комментарии, позиция дня\n"
+    "• конец дня запуска — финальный отчёт + список тех, кто комментировал"
+)
 
 # ---------- обработчики (порядок важен: quiz -> ссылка -> прочее) ----------
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❓ Что такое Product Hunt", callback_data="what")],
-        [InlineKeyboardButton(text="📋 Чек-лист бесплатно", callback_data="checklist")],
-    ])
-    await message.answer(WELCOME, reply_markup=kb)
+    await message.answer(WELCOME, reply_markup=_client_kb(message.from_user.id))
 
 
 @router.callback_query(F.data == "what")
@@ -687,6 +768,106 @@ async def cb_prep(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
+@router.callback_query(F.data == "dayx")
+async def cb_dayx(cb: CallbackQuery) -> None:
+    DAYX_WAIT[cb.from_user.id] = True
+    await cb.message.answer(DAYX_INTRO)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "support")
+async def cb_support(cb: CallbackQuery) -> None:
+    if _is_admin(cb.from_user.id):
+        await cb.message.answer("Ты админ: тикеты пользователей приходят к тебе автоматически (кнопка «Ответить»).")
+        await cb.answer()
+        return
+    SUPPORT_WAIT[cb.from_user.id] = True
+    await cb.message.answer(
+        "💬 Напиши свой вопрос — сразу уйдёт админу (он увидит тебя и твой ID).\n"
+        "Ответ придёт прямо в этот чат."
+    )
+    await cb.answer()
+
+
+# ---------- админка (кнопки) ----------
+
+ADMIN_MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+     InlineKeyboardButton(text="📣 Рассылка", callback_data="broadcast")],
+    [InlineKeyboardButton(text="➕ Дать клиентом", callback_data="give"),
+     InlineKeyboardButton(text="➖ Забрать клиентом", callback_data="take")],
+])
+
+
+@router.callback_query(F.data == "admin")
+async def cb_admin(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        await cb.answer("Только для админа", show_alert=True)
+        return
+    await cb.message.answer("⚙️ Админка", reply_markup=ADMIN_MENU_KB)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "stats")
+async def cb_stats(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        await cb.answer("Только для админа", show_alert=True)
+        return
+    users = _load_users()
+    total = len(users)
+    clients = sum(1 for e in users.values() if e.get("premium"))
+    tickets = sum(int(e.get("support", 0)) for e in users.values())
+    lines = [f"📊 Статистика:\nПользователей: {total} · Клиентов: {clients} · Тикетов: {tickets}", ""]
+    for uid, e in sorted(users.items(), key=lambda kv: kv[1].get("last_seen", 0), reverse=True)[:25]:
+        tags = []
+        if e.get("admin"):
+            tags.append("админ")
+        if e.get("premium"):
+            tags.append("клиент")
+        un = f"@{e['username']}" if e.get("username") else "без username"
+        line = f"{uid} · {un} · с {_ts(e.get('first_seen'))} · был {_ts(e.get('last_seen'))}"
+        if tags:
+            line += " · " + ", ".join(tags)
+        lines.append(line)
+    await cb.message.answer("\n".join(lines))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "broadcast")
+async def cb_broadcast(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        await cb.answer("Только для админа", show_alert=True)
+        return
+    ADMIN_MODE[cb.from_user.id] = {"mode": "broadcast"}
+    await cb.message.answer(
+        "📣 Пришли текст рассылки (плюшки, промо, анонс — что хочешь).\n"
+        "Я отправлю его каждому пользователю бота."
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.in_({"give", "take"}))
+async def cb_give_take(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        await cb.answer("Только для админа", show_alert=True)
+        return
+    ADMIN_MODE[cb.from_user.id] = {"mode": cb.data}
+    verb = "дать" if cb.data == "give" else "забрать"
+    await cb.message.answer(f"➕/➖ {verb} статус «клиент».\nПришли ID пользователя (цифры) или @username.")
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("rply_"))
+async def cb_reply(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        await cb.answer("Только для админа", show_alert=True)
+        return
+    to = int(cb.data.split("_", 1)[1])
+    ADMIN_MODE[cb.from_user.id] = {"mode": "reply", "to": to}
+    await cb.message.answer(f"✍️ Напиши ответ — доставлю его в чат пользователя {to}.")
+    await cb.answer()
+
+
 @router.message(F.text, lambda m: m.from_user and m.from_user.id in QUIZ)
 async def handle_quiz(message: Message) -> None:
     st = QUIZ[message.from_user.id]
@@ -703,7 +884,7 @@ async def handle_quiz(message: Message) -> None:
     else:
         st["english"] = ans.startswith(("да", "yes", "y", "д"))
         del QUIZ[message.from_user.id]
-        await message.answer(quiz_score(st), reply_markup=MAIN_BUTTONS)
+        await message.answer(quiz_score(st), reply_markup=_client_kb(message.from_user.id))
 
 
 # ---------- День X: «комната комментариев» (v0.2.0) ----------
@@ -716,17 +897,88 @@ DAYX_WAIT = {}  # chat_id -> True: ждём ссылку на запуск
 
 @router.message(F.text.startswith("/dayx"))
 async def cmd_dayx(message: Message) -> None:
+    # запасной вход (главный — кнопка «📡 День X»)
     DAYX_WAIT[message.from_user.id] = True
-    await message.answer(
-        "📡 День X: комната комментариев.\n\n"
-        "Пришли ссылку на свой запуск на Product Hunt (или на страницу продукта):\n"
-        "https://www.producthunt.com/posts/твой-продукт\n\n"
-        "Что будет дальше:\n"
-        "• новый комментарий → я мгновенно пишу ответ за тебя (под твой продукт)\n"
-        "• ты копируешь текст и вставляешь в PH (10 секунд)\n"
-        "• каждые 2 часа — сводка: голоса, комментарии, позиция дня\n"
-        "• конец дня запуска — финальный отчёт + список тех, кто комментировал"
-    )
+    await message.answer(DAYX_INTRO)
+
+
+@router.message(F.text, lambda m: m.from_user.id in ADMIN_MODE)
+async def handle_admin_msg(message: Message) -> None:
+    """Текст админа, когда он что-то нажал в админке (рассылка / дать / забрать / ответ)."""
+    st = ADMIN_MODE.pop(message.from_user.id, None)
+    if not st:
+        return
+    txt = message.text.strip()
+    mode = st.get("mode")
+
+    if mode == "broadcast":
+        users = _load_users()
+        ok, fail = 0, 0
+        for uid, _e in users.items():
+            if int(uid) == message.from_user.id:
+                continue
+            try:
+                await message.bot.send_message(int(uid), txt)
+                ok += 1
+            except Exception:
+                fail += 1
+            if ok and ok % 25 == 0:
+                await asyncio.sleep(1.0)
+        await message.answer(f"📣 Рассылка завершена: доставлено {ok}, не доставлено {fail}.")
+
+    elif mode in ("give", "take"):
+        uid, users = _find_user_ref(txt)
+        if not uid:
+            await message.answer("Не нашёл такого пользователя. Пришли ID из статистики (кнопка 📊) или @username.")
+            return
+        users[uid]["premium"] = (mode == "give")
+        _save_users(users)
+        un = users[uid].get("username", "без username")
+        word = "дан" if mode == "give" else "снят"
+        await message.answer(f"✅ Статус «клиент» {word} пользователю {uid} (@{un}).")
+
+    elif mode == "reply":
+        try:
+            await message.bot.send_message(st["to"], "🎫 Поддержка:\n" + txt)
+            await message.answer(f"✅ Ответ доставлен пользователю {st['to']}.")
+        except Exception:
+            await message.answer("Не смог доставить (возможно, пользователь заблокировал бота).")
+
+
+@router.message(F.text, lambda m: m.from_user.id in SUPPORT_WAIT)
+async def handle_support_msg(message: Message) -> None:
+    """Вопрос поддержки -> тикет в чат админа (с кнопкой «Ответить»)."""
+    SUPPORT_WAIT.pop(message.from_user.id, None)
+    u = message.from_user
+    users = _load_users()
+    e = users.get(str(u.id), {})
+    e["support"] = int(e.get("support", 0)) + 1
+    users[str(u.id)] = e
+    _save_users(users)
+
+    admin_uid = None
+    if ADMIN_CHAT_ID:
+        admin_uid = int(ADMIN_CHAT_ID)
+    else:
+        for uid, ee in users.items():
+            if ee.get("admin"):
+                admin_uid = int(uid)
+                break
+    if not admin_uid:
+        await message.answer("Поддержка сейчас не подключена. Напиши в канал https://t.me/ProductHuntBoosting")
+        return
+    un = f"@{u.username}" if u.username else "без username"
+    try:
+        await message.bot.send_message(
+            admin_uid,
+            f"🎫 Тикет: {un} (ID: {u.id})\n\n“{message.text}”",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="↩️ Ответить", callback_data=f"rply_{u.id}")],
+            ]),
+        )
+        await message.answer("✅ Вопрос ушёл админу. Ответ придёт прямо в этот чат.")
+    except Exception:
+        await message.answer("Не смог отправить админу. Напиши в канал https://t.me/ProductHuntBoosting")
 
 
 @router.message(F.text.regexp(r"https?://\S+"),
@@ -812,11 +1064,11 @@ async def handle_link(message: Message) -> None:
                 if found:
                     break
         if found:
-            await status.edit_text(analyze_ph_api(found), reply_markup=MAIN_BUTTONS)
+            await status.edit_text(analyze_ph_api(found), reply_markup=_client_kb(message.from_user.id))
             return
         hit = await algolia_lookup(slugs[0]) if slugs else None
         if hit:
-            await status.edit_text(analyze_ph_live(hit), reply_markup=MAIN_BUTTONS)
+            await status.edit_text(analyze_ph_live(hit), reply_markup=_client_kb(message.from_user.id))
             return
         await status.edit_text(
             "📡 Продукта ещё нет в публичном поиске PH (coming soon / не фичерен).\n"
@@ -828,7 +1080,7 @@ async def handle_link(message: Message) -> None:
             await status.edit_text(QUIZ_INTRO)
             return
         text = analyze(html, url) + _source_note(source)
-        await status.edit_text(text, reply_markup=MAIN_BUTTONS)
+        await status.edit_text(text, reply_markup=_client_kb(message.from_user.id))
         return
 
     status = await message.answer("🤔 Открываю страницу и смотрю... (до минуты)")
@@ -838,11 +1090,14 @@ async def handle_link(message: Message) -> None:
         await status.edit_text(QUIZ_INTRO)
         return
     text = analyze(html, url) + _source_note(source)
-    await status.edit_text(text, reply_markup=MAIN_BUTTONS)
+    await status.edit_text(text, reply_markup=_client_kb(message.from_user.id))
 
 
 @router.message(F.text)
 async def handle_other(message: Message) -> None:
+    if _is_admin(message.from_user.id):
+        await message.answer("Ты админ: все действия — кнопками (⚙️ Админ). Текст я понимаю только в режимах админки.")
+        return
     await message.answer(NOT_A_LINK)
 
 # ---------- старт (v0.1.5: свой поллинг + «watchdog») ----------
@@ -854,6 +1109,23 @@ async def handle_other(message: Message) -> None:
 
 dp = Dispatcher()
 dp.include_router(router)
+
+
+class _UserTouchMiddleware:
+    """Каждое сообщение/нажатие — в реестр users.json (первый = админ)."""
+
+    async def __call__(self, handler, event, data):
+        try:
+            fu = event.from_user
+            if fu and getattr(fu, "id", None):
+                _touch_user(fu)
+        except Exception:
+            pass
+        return await handler(event, data)
+
+
+dp.message.middleware(_UserTouchMiddleware())
+dp.callback_query.middleware(_UserTouchMiddleware())
 
 OFFSET_FILE = Path(__file__).parent / "state_offset.txt"
 
@@ -930,7 +1202,7 @@ async def main() -> None:
         BotCommand(command="dayx", description="День X: радар комментариев запуска"),
     ])
     me = await bot.me()
-    print(f"🤖 Бот @{me.username} запущен (v0.2.0, watchdog + радар День X)", flush=True)
+    print(f"🤖 Бот @{me.username} запущен (v0.3.0: кнопки, админка, тикеты, радар День X)", flush=True)
     asyncio.create_task(dayx.dayx_poller(bot))
     await resilient_polling(bot)
 

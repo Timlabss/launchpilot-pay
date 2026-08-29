@@ -59,6 +59,23 @@ jobs:
           " > dayx.json
           echo "dayx.json: $(wc -c < dayx.json 2>/dev/null || echo 0) bytes"
 
+      - name: load users (state branch)
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/users.json?ref=state" \
+            | python3 -c "
+          import sys, json, base64
+          try:
+              j = json.load(sys.stdin)
+              print(base64.b64decode(j['content']).decode().strip(), end='')
+          except Exception:
+              pass
+          " > users.json
+          echo "users.json: $(wc -c < users.json 2>/dev/null || echo 0) bytes"
+
       - name: run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -118,4 +135,31 @@ jobs:
               -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
               "https://api.github.com/repos/${{ github.repository }}/contents/state/dayx.json" \
               -d "{\"message\":\"dayx state\",\"content\":\"$B64\",\"branch\":\"state\"}"
+          fi
+
+      - name: save users
+        if: always()
+        env:
+          GH: ${{ github.token }}
+        run: |
+          set +e
+          if [ ! -s users.json ]; then echo "no users.json, skip"; exit 0; fi
+          B64=$(base64 -w0 users.json)
+          RESP=$(curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/state/users.json?ref=state")
+          SHA=$(echo "$RESP" | python3 -c "
+          import sys, json
+          try: print(json.load(sys.stdin).get('sha',''))
+          except Exception: pass
+          ")
+          if [ -n "$SHA" ]; then
+            curl -s -o /dev/null -w "users saved (update) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/users.json" \
+              -d "{\"message\":\"users state\",\"content\":\"$B64\",\"branch\":\"state\",\"sha\":\"$SHA\"}"
+          else
+            curl -s -o /dev/null -w "users saved (create) http=%{http_code}\n" \
+              -X PUT -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/state/users.json" \
+              -d "{\"message\":\"users state\",\"content\":\"$B64\",\"branch\":\"state\"}"
           fi
