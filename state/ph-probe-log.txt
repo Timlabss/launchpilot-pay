@@ -1,1 +1,15 @@
-python3: can't open file '/home/runner/work/launchpilot-pay/launchpilot-pay/ph_probe.py': [Errno 2] No such file or directory
+=== HEADLESS ===
+MODE: headless | stealth: False
+title: Just a moment...
+click fail: input[type='checkbox'] TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+click fail: .cb-lb TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+click fail: #challenge-stage TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+RESULT: NO-CF-IFRAME-CLICK (не нашёлся чекбокс)
+
+=== HEADFUL ===
+MODE: headful | stealth: False
+title: Just a moment...
+click fail: input[type='checkbox'] TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+click fail: .cb-lb TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+click fail: #challenge-stage TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
+RESULT: NO-CF-IFRAME-CLICK (не нашёлся чекбокс)
