@@ -1,4 +1,4 @@
-# Разовая разведка: может ли stealth-браузер на GitHub-раннере войти в PH
+# Разведка PH: без входа (CF-стена + карта логин-страницы) или с входом (email+pass)
 import os, time
 from playwright.sync_api import sync_playwright
 
@@ -19,10 +19,34 @@ def cf_check(page):
         t = ""
     return "just a moment" in t.lower() or "attention required" in t.lower()
 
+def dump_login_page(page):
+    print("login url:", page.url, "| title:", page.title())
+    if cf_check(page):
+        page.screenshot(path="/tmp/shot_login.png")
+        print("RESULT: CF-WALL on login"); return
+    try:
+        for b in page.locator("button").all()[:30]:
+            try:
+                t = b.inner_text(timeout=1500).strip()
+                if t: print("button:", t[:70])
+            except Exception: pass
+    except Exception: pass
+    try:
+        for a in page.locator("a").all()[:60]:
+            try:
+                href = a.get_attribute("href") or ""
+                if any(w in href.lower() for w in ("oauth", "auth", "google", "github", "linkedin")):
+                    print("auth-link:", (a.inner_text(timeout=1500).strip() or "(иконка)")[:40], "->", href[:140])
+            except Exception: pass
+    except Exception: pass
+    try:
+        for i in page.locator("input").all()[:10]:
+            print("input:", i.get_attribute("type"), i.get_attribute("name"), i.get_attribute("placeholder"))
+    except Exception: pass
+    page.screenshot(path="/tmp/shot_login.png")
+
 def main():
     print("email set:", bool(EMAIL), "| pass set:", bool(PASS), "| stealth:", bool(stealth_sync))
-    if not (EMAIL and PASS):
-        print("NO CREDENTIALS"); return
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -42,64 +66,54 @@ def main():
         except Exception as e:
             print("goto error:", repr(e))
         time.sleep(8)
-        print("home url:", page.url)
-        print("home title:", page.title())
+        print("home url:", page.url, "| title:", page.title())
         page.screenshot(path="/tmp/shot_home.png")
         if cf_check(page):
             print("RESULT: CF-WALL on home (не прошли Cloudflare)"); browser.close(); return
+        print("home loaded OK")
 
-        print("-> login page")
+        if not (EMAIL and PASS):
+            print("-> NO-LOGIN MODE: карта логин-страницы")
+            page.goto("https://www.producthunt.com/login", wait_until="domcontentloaded", timeout=60000)
+            time.sleep(6)
+            dump_login_page(page)
+            print("RESULT: NO-LOGIN-SCAN-DONE")
+            browser.close()
+            return
+
         page.goto("https://www.producthunt.com/login", wait_until="domcontentloaded", timeout=60000)
         time.sleep(6)
-        print("login url:", page.url, "| title:", page.title())
-        if cf_check(page):
-            page.screenshot(path="/tmp/shot_login.png")
-            print("RESULT: CF-WALL on login"); browser.close(); return
-
+        dump_login_page(page)
         email_sel = page.locator("input[type='email'], input[name='email'], input[autocomplete='email']").first
         pass_sel = page.locator("input[type='password']").first
         try:
-            email_sel.wait_for(timeout=20000)
-            pass_sel.wait_for(timeout=20000)
+            email_sel.wait_for(timeout=10000)
+            pass_sel.wait_for(timeout=10000)
         except Exception as e:
-            print("no standard form:", repr(e))
-            page.screenshot(path="/tmp/shot_login.png")
-            try:
-                print(page.inner_text("body")[:800].replace("\n", " | "))
-            except Exception:
-                pass
-            print("RESULT: NO-FORM (видимо не то, что ждали)"); browser.close(); return
-
+            print("no email/pass form (OAuth-only?)"); print("RESULT: NO-FORM"); browser.close(); return
         email_sel.fill(EMAIL); time.sleep(0.8)
         pass_sel.fill(PASS); time.sleep(0.8)
-        print("-> submit")
         try:
             page.locator("button[type='submit']").first.click()
-        except Exception as e:
-            print("submit click error:", repr(e))
+        except Exception:
             pass_sel.press("Enter")
         time.sleep(10)
         url = page.url; title = page.title()
-        body = ""
-        try:
-            body = page.inner_text("body")[:600]
-        except Exception:
-            pass
+        try: body = page.inner_text("body")[:600]
+        except Exception: body = ""
         print("after submit url:", url, "| title:", title)
         print("body:", body.replace("\n", " | ")[:400])
         page.screenshot(path="/tmp/shot_after.png")
         low = (title + " " + body).lower()
-        if "login" in url or "signin" in url:
-            if any(w in low for w in ("incorrect", "invalid", "wrong", "doesn't match", "not found", "check your")):
+        if "login" in url:
+            if any(w in low for w in ("incorrect", "invalid", "wrong", "not found", "check your")):
                 print("RESULT: BAD-CREDENTIALS")
-            elif any(w in low for w in ("verify", "2fa", "two-factor", "code", "authenticat")):
+            elif any(w in low for w in ("verify", "2fa", "code", "authenticat")):
                 print("RESULT: 2FA-CODE-NEEDED")
-            elif "just a moment" in low:
-                print("RESULT: CF-WALL after submit")
             else:
-                print("RESULT: LOGIN-FORM-STILL (не ушло)")
+                print("RESULT: LOGIN-FORM-STILL")
         else:
-            print("RESULT: LOGIN-OK (покинули страницу логина, url выше)")
+            print("RESULT: LOGIN-OK")
         browser.close()
 
 main()
