@@ -19,7 +19,7 @@ jobs:
           python -c "from playwright_stealth import Stealth; print('stealth import OK')" || echo "STEALTH-IMPORT-FAILED"
           python -m playwright install --with-deps chromium
       - name: probe
-        run: python3 -u probe3.py > /tmp/log3.txt 2>&1 || true
+        run: python3 -u probe4.py > /tmp/log3.txt 2>&1 || true
       - name: save results
         if: always()
         env:
@@ -48,6 +48,6 @@ jobs:
             fi
           }
           save_file "ph-probe-log.txt" /tmp/log3.txt
-          save_file "ph-shot-headless.b64" /tmp/shot3_home.png
-          save_file "ph-shot-headful.b64" /tmp/shot3_login.png
+          save_file "ph-shot-headless.b64" /tmp/shot4_login.png
+          save_file "ph-shot-headful.b64" /tmp/shot4_google.png
           cat /tmp/log3.txt
