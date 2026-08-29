@@ -1,15 +1,13 @@
-=== HEADLESS ===
-MODE: headless | stealth: False
-title: Just a moment...
-click fail: input[type='checkbox'] TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-click fail: .cb-lb TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-click fail: #challenge-stage TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-RESULT: NO-CF-IFRAME-CLICK (не нашёлся чекбокс)
-
-=== HEADFUL ===
-MODE: headful | stealth: False
-title: Just a moment...
-click fail: input[type='checkbox'] TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-click fail: .cb-lb TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-click fail: #challenge-stage TimeoutError('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(
-RESULT: NO-CF-IFRAME-CLICK (не нашёлся чекбокс)
+stealth import: OK
+stealth applied
+home title: Just a moment...
+--- frames ---
+frame url: https://www.producthunt.com/
+frame url: https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/1x0zf/0x4AAAAAAADnPIDROrmt1Wwj/ligh
+--- iframes ---
+frame click fail: input[type='checkbox'] TimeoutError('Locator.click: Timeout 6000ms exceeded.\nCall log:\n  - 
+frame click fail: .cb-lb TimeoutError('Locator.click: Timeout 6000ms exceeded.\nCall log:\n  - 
+frame click fail: body TimeoutError('Locator.click: Timeout 6000ms exceeded.\nCall log:\n  - 
+coords click fail: TimeoutError('Locator.bounding_box: Timeout 5000ms exceeded.\nCall log:\n  - waiting for l
+js click sent
+RESULT: CF-STILL (стена держится даже со stealth)
