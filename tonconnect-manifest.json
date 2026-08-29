@@ -1,0 +1,8 @@
+{
+  "id": "launchpilot-pay",
+  "name": "Launch Pilot",
+  "url": "https://timlabss.github.io/launchpilot-pay/",
+  "locale": "ru",
+  "logo": "https://timlabss.github.io/launchpilot-pay/icon.png",
+  "description": "Оплата запуска на Product Hunt (Payment for Product Hunt launch)"
+}
