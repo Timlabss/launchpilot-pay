@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1420">
 <title>Launch Pilot — Оплата</title>
-<link rel="stylesheet" href="https://unpkg.com/@tonconnect/ui/styles.css">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -22,24 +21,31 @@
     background: #161d2e;
     border: 1px solid #232e47;
     border-radius: 20px;
-    padding: 28px 22px;
+    padding: 26px 20px;
     box-shadow: 0 20px 60px rgba(0,0,0,.45);
     text-align: center;
   }
-  .logo { font-size: 44px; line-height: 1; margin-bottom: 10px; }
-  h1 { font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+  .logo { font-size: 42px; line-height: 1; margin-bottom: 8px; }
+  h1 { font-size: 22px; font-weight: 700; }
   .plan { font-size: 18px; font-weight: 600; color: #9db4d8; margin-top: 6px; }
   .plan-desc { font-size: 13px; color: #6f82a3; margin-top: 4px; min-height: 16px; }
-  .price { font-size: 40px; font-weight: 800; margin-top: 18px; }
-  .ton-amount { font-size: 15px; color: #7fd4a8; margin-top: 6px; min-height: 20px; }
+  .price { font-size: 38px; font-weight: 800; margin-top: 16px; }
+  .ton-amount { font-size: 15px; color: #7fd4a8; margin-top: 5px; min-height: 20px; }
   .ton-amount.warn { color: #e5b567; }
-  .divider { height: 1px; background: #232e47; margin: 20px 0; }
-  #tonconnect { text-align: left; }
+  .divider { height: 1px; background: #232e47; margin: 18px 0; }
+  #tc-button { text-align: center; }
+  #tc-button button {
+    background: #1f2a44 !important; color: #eef2f8 !important;
+    border: 1px solid #33415f !important; border-radius: 12px !important;
+    font-size: 15px !important;
+  }
   #balance { font-size: 14px; margin-top: 12px; min-height: 18px; color: #9db4d8; }
   #balance.ok { color: #7fd4a8; }
   #balance.bad { color: #f08c8c; }
+  #balance.warn { color: #e5b567; }
+  .to-addr { font-size: 11px; color: #566a8e; margin-top: 8px; word-break: break-all; }
   button.main {
-    width: 100%; margin-top: 18px;
+    width: 100%; margin-top: 16px;
     background: #3d9bff; color: #fff; border: 0; border-radius: 14px;
     font-size: 17px; font-weight: 700; padding: 16px;
     cursor: pointer; transition: transform .06s ease;
@@ -54,20 +60,20 @@
   #status { font-size: 14px; margin-top: 14px; min-height: 18px; color: #9db4d8; }
   #status.err { color: #f08c8c; }
   #status.good { color: #7fd4a8; }
+  #status.warn { color: #e5b567; }
   .code-box {
     margin: 16px auto 4px; display: none;
-    background: #0d1322;
-    border: 1px dashed #3d5a8f; border-radius: 12px;
-    padding: 14px; font-size: 26px; font-weight: 800; letter-spacing: 4px;
+    background: #0d1322; border: 1px dashed #3d5a8f; border-radius: 12px;
+    padding: 14px; font-size: 26px; font-weight: 800; letter-spacing: 4px; cursor: pointer;
   }
   .lang { position: fixed; top: 12px; right: 14px; font-size: 12px; color: #5c6f92; text-decoration: underline; cursor: pointer; }
-  details { margin-top: 16px; text-align: left; }
+  details { margin-top: 14px; text-align: left; }
   summary { font-size: 12px; color: #4d5f80; cursor: pointer; }
   #dbg { font-size: 11px; color: #6b7ea1; margin-top: 6px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
 </style>
 </head>
 <body>
-<div class="lang" id="lang-btn">EN</lang-btn></div>
+<div class="lang" id="lang-btn">EN</div>
 <div id="app">
   <div class="logo">🚀</div>
   <h1>Launch Pilot</h1>
@@ -76,8 +82,9 @@
   <div class="price" id="price"></div>
   <div class="ton-amount" id="ton-amount"></div>
   <div class="divider"></div>
-  <div id="tonconnect"></div>
+  <div id="tc-button"></div>
   <div id="balance"></div>
+  <div class="to-addr" id="to-addr"></div>
   <button class="main" id="pay-btn"></button>
   <button class="ghost" id="tg-btn" style="display:none"></button>
   <div id="status"></div>
@@ -88,44 +95,54 @@
   </details>
 </div>
 
-<script src="https://unpkg.com/@tonconnect/ui" type="module" crossorigin></script>
-<script type="module">
+<script src="/vendor/tonconnect-ui.min.js"></script>
+<script>
 // ================= НАСТРОЙКИ (меняем только здесь) =================
-const WALLET = "UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk";            // <-- кошелёк для приёма (base64, начинается с UQ/EQ) — поставит владелец
-const CONFIRM_URL = "";       // <-- адрес бота для авто-подтверждения (поставит владелец)
+const WALLET_FRIENDLY = "UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk"; // кошелёк для приёма
+const CONFIRM_URL = ""; // адрес бота для авто-подтверждения (заполнит владелец)
 const TG_BOT = "PHlaunchpilot_bot";
-const GAS_TON = 0.1;          // запас на газ, чтобы «оплатил только газ» больше не повторялось
+const GAS_TON = 0.1; // запас на газ
 const PLANS = {
-  kit:       { usd: 19, ru: "Запуск Kit",            ruD: "все тексты + день + хантеры",            en: "Launch Kit",              enD: "all texts + best day + hunters" },
-  autopilot: { usd: 49, ru: "Автопилот — День X",    ruD: "Kit + комната комментариев 24/7 + отчёт", en: "Autopilot — Day X",       enD: "Kit + comment radar 24/7 + report" },
+  kit:       { usd: 19, ru: "Запуск Kit",           ruD: "все тексты + день + хантеры",            en: "Launch Kit",            enD: "all texts + best day + hunters" },
+  autopilot: { usd: 49, ru: "Автопилот — День X",   ruD: "Kit + комната комментариев 24/7 + отчёт", en: "Autopilot — Day X",     enD: "Kit + comment radar 24/7 + report" },
 };
 // ===================================================================
-
+window.addEventListener("error", (e) => {
+  const d = document.getElementById("dbg");
+  if (d) d.textContent += new Date().toISOString().slice(11,19) + " ERROR: " + (e.message || e.error) + "\n";
+  const w = document.getElementById("dbg-wrap"); if (w) w.style.display = "block";
+});
+</script>
+<script type="module">
 const params = new URL(location.href).searchParams;
 const planKey = PLANS[params.get("plan")] ? params.get("plan") : "autopilot";
 let L = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
 let code = params.get("code") || sessionStorage.getItem("lp_code") || genCode();
 sessionStorage.setItem("lp_code", code);
-let connector = null, myAddress = null, balanceNano = "0", rate = null, paying = false;
-let shownTx = null;
+
+let rate = null;
+let myFriendly = null;
+let balanceNano = null;   // null = неизвестно
+let balanceState = "none"; // none | loading | ok | unknown
+let ui = null;
+let paying = false;
 
 const $ = (id) => document.getElementById(id);
 const el = { plan: $("plan-name"), planD: $("plan-desc"), price: $("price"), ton: $("ton-amount"),
-  bal: $("balance"), pay: $("pay-btn"), tg: $("tg-btn"), st: $("status"), codeBox: $("code-box"), dbg: $("dbg") };
+  bal: $("balance"), to: $("to-addr"), pay: $("pay-btn"), tg: $("tg-btn"), st: $("status"),
+  codeBox: $("code-box"), dbg: $("dbg") };
 
 function genCode() {
   const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  const c = new Uint8Array(6); crypto.getRandomValues(c);
+  let s = ""; const c = new Uint8Array(6); crypto.getRandomValues(c);
   for (const x of c) s += A[x % A.length];
   return s;
 }
-function dbg(msg) {
-  el.dbg.textContent += new Date().toISOString().slice(11, 19) + " " + msg + "\n";
-  try { $("dbg-wrap").style.display = "block"; } catch (e) {}
-}
+function dbg(m) { el.dbg.textContent += new Date().toISOString().slice(11,19) + " " + m + "\n"; $("dbg-wrap").style.display = "block"; }
 function status(msg, cls) { el.st.textContent = msg; el.st.className = cls || ""; }
-const fmt = (n) => (n / 1e9).toFixed(2);
+const fmtT = (n) => (n / 1e9).toFixed(2);
+const neededTon = () => PLANS[planKey].usd / rate;
+const neededNano = () => Math.ceil(neededTon() * 1e9);
 
 function render() {
   const p = PLANS[planKey];
@@ -136,21 +153,32 @@ function render() {
   el.price.textContent = "$" + p.usd;
   el.tg.textContent = L === "ru" ? "↩ Вернуться в бота" : "↩ Back to the bot";
   el.tg.onclick = () => { location.href = "tg://resolve?domain=" + TG_BOT; };
+  el.to.textContent = (L === "ru" ? "деньги уходят на: " : "funds go to: ") + WALLET_FRIENDLY;
+
   if (!rate) { el.ton.textContent = L === "ru" ? "получаем курс TON…" : "fetching TON rate…"; el.ton.className = "ton-amount warn"; }
-  else el.ton.textContent = "≈ " + neededTon().toFixed(2) + " TON";
-  el.pay.textContent = WALLET
-    ? (L === "ru" ? "Оплатить " : "Pay ") + (rate ? neededTon().toFixed(2) + " TON" : "")
-    : (L === "ru" ? "⚙️ Оплата ещё не настроена" : "⚙️ Payment not configured yet");
-  el.pay.disabled = !WALLET || !rate || paying || !connector;
-  if (myAddress) {
+  else { el.ton.textContent = "≈ " + neededTon().toFixed(2) + " TON"; el.ton.className = "ton-amount"; }
+
+  if (balanceState === "none") { el.bal.textContent = ""; el.bal.className = ""; }
+  else if (balanceState === "loading") { el.bal.textContent = L === "ru" ? "проверяем баланс…" : "checking balance…"; el.bal.className = ""; }
+  else if (balanceState === "unknown") {
+    el.bal.textContent = "⚠️ " + (L === "ru" ? "баланс не удалось получить — убедись, что в кошельке есть " : "couldn't read balance — make sure your wallet has ") +
+      (rate ? neededTon().toFixed(2) : "?") + " TON + газ";
+    el.bal.className = "warn";
+  }
+  else if (balanceState === "ok") {
     const need = rate ? (PLANS[planKey].usd / rate + GAS_TON) : null;
-    const have = parseFloat(balanceNano) / 1e9;
-    if (need === null) { el.bal.textContent = ""; el.bal.className = ""; }
-    else if (have >= need) { el.bal.textContent = "✅ " + fmt(balanceNano) + " TON — " + (L === "ru" ? "хватает" : "enough"); el.bal.className = "ok"; }
+    if (need === null) { el.bal.textContent = fmtT(balanceNano) + " TON"; el.bal.className = "ok"; }
+    else if (balanceNano / 1e9 >= need) { el.bal.textContent = "✅ " + fmtT(balanceNano) + " TON — " + (L === "ru" ? "хватает" : "enough"); el.bal.className = "ok"; }
     else { el.bal.textContent = "❌ " + (L === "ru" ? "Не хватает. Нужно " : "Not enough. Need ") + need.toFixed(2) + " TON (" + (L === "ru" ? "плата + газ" : "price + gas") + ")"; el.bal.className = "bad"; }
   }
+
+  const connected = !!(ui && ui.connected);
+  el.pay.textContent = !rate
+    ? (L === "ru" ? "⏳ Ждём курс…" : "⏳ Waiting for rate…")
+    : (L === "ru" ? "💳 Оплатить " : "💳 Pay ") + neededTon().toFixed(2) + " TON";
+  el.pay.disabled = !connected || !rate || paying;
 }
-function neededTon() { return PLANS[planKey].usd / rate; }
+$("lang-btn").onclick = () => { L = L === "ru" ? "en" : "ru"; render(); };
 
 async function getRate() {
   try {
@@ -159,45 +187,93 @@ async function getRate() {
     const pair = (j.pairs || []).find(p => p.base === "TON" && p.quote === "USD");
     if (pair && pair.rate) { rate = pair.rate; render(); return; }
     throw 0;
-  } catch (e) {}
+  } catch (e) { dbg("rate tonapi: " + (e && e.message || e)); }
   try {
     const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd");
     const j = await r.json();
     const v = j["the-open-network"] && j["the-open-network"].usd;
     if (v) { rate = v; render(); return; }
     throw 0;
-  } catch (e) {}
+  } catch (e) { dbg("rate coingecko: " + (e && e.message || e)); }
   rate = null; render();
   status(L === "ru" ? "Курс не получен. Перезагрузи страничку." : "Rate unavailable. Reload the page.", "err");
 }
 
+async function fetchBalance() {
+  if (!myFriendly) return;
+  balanceState = "loading"; render();
+  try {
+    const r = await fetch("https://tonapi.io/v2/account/" + encodeURIComponent(myFriendly));
+    const j = await r.json();
+    if (!r.ok || j.balance == null) throw new Error("http " + r.status);
+    balanceNano = Number(j.balance); balanceState = "ok";
+  } catch (e) {
+    dbg("balance: " + (e && e.message || e));
+    balanceNano = null; balanceState = "unknown";
+  }
+  render();
+}
+
+function refreshAccount() {
+  const acc = ui && ui.account;
+  if (acc && acc.address) {
+    try {
+      myFriendly = window.TON_CONNECT_UI.toUserFriendlyAddress(acc.address);
+      dbg("connected: " + myFriendly);
+      fetchBalance();
+    } catch (e) {
+      dbg("toUserFriendlyAddress: " + e);
+      myFriendly = acc.address;
+    }
+  } else {
+    myFriendly = null; balanceNano = null; balanceState = "none";
+  }
+  render();
+}
+
+async function sha256b64(b64) {
+  try {
+    const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const d = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) { return null; }
+}
+
 async function pay() {
-  if (!WALLET || !rate || paying || !connector) return;
+  if (!ui || !rate || paying) return;
+  if (!ui.connected) {
+    status(L === "ru" ? "Сначала выбери кошелёк на кнопке выше 👆" : "First pick a wallet with the button above 👆", "warn");
+    try { await ui.openModal(); } catch (e) { dbg("openModal: " + e); }
+    return;
+  }
   paying = true; render();
   try {
-    const nano = String(Math.ceil(neededTon() * 1e9));
     status(L === "ru" ? "Подтверди оплату в кошельке…" : "Confirm the payment in your wallet…");
-    const tx = await connector.sendTransaction({
+    const res = await ui.sendTransaction({
       validUntil: Math.floor(Date.now() / 1000) + 3600,
-      dest: WALLET,
-      value: nano,
-      bounce: false,
+      network: "-239",
+      messages: [{ address: WALLET_FRIENDLY, amount: String(neededNano()) }],
     });
-    shownTx = tx && tx.hash;
-    status(L === "ru" ? "⏳ Транзакция уходит в сеть…" : "⏳ Transaction is on its way…");
-    try { await connector.waitForTransaction(tx.hash, 180000); } catch (e) { dbg("waitForTransaction: " + (e && e.message || e)); }
+    const bocHash = res && res.boc ? await sha256b64(res.boc) : null;
+    dbg("signed boc hash: " + bocHash);
     if (CONFIRM_URL) {
       fetch(CONFIRM_URL, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, tx: shownTx, address: myAddress, value: nano, plan: planKey }) }).catch(e => dbg("confirm post: " + e));
+        body: JSON.stringify({ code, bocHash, from: myFriendly, value: String(neededNano()), plan: planKey }) })
+        .then(() => dbg("confirm posted")).catch(e => dbg("confirm post: " + e));
     }
     success();
   } catch (e) {
-    dbg("pay error: " + (e && (e.message || JSON.stringify(e)) || e));
+    dbg("pay: " + (e && (e.name + ": " + e.message || e)));
     paying = false;
-    status(L === "ru" ? "Не отправилось. Попробуй ещё раз." : "Failed. Try again.", "err");
+    const s = String((e && e.name) || "") + " " + String((e && e.message) || "");
+    if (/reject|cancel/i.test(s)) status(L === "ru" ? "Отменено — деньги не списались." : "Cancelled — no money moved.", "warn");
+    else status(L === "ru" ? "Не отправилось. Попробуй ещё раз." : "Failed. Try again.", "err");
     render();
   }
 }
+el.pay.onclick = pay;
+
 function success() {
   el.codeBox.style.display = "block";
   el.codeBox.textContent = code;
@@ -209,32 +285,25 @@ function success() {
     : "🎉 Done! The bot is delivering your order. If anything is missing — send the code above to the bot.", "good");
 }
 
-$("lang-btn").onclick = () => { L = L === "ru" ? "en" : "ru"; render(); };
-el.pay.onclick = pay;
-
-// TON Connect
+// TON Connect (наш собственный файл, без внешних CDN)
 try {
-  const mod = await import("https://unpkg.com/@tonconnect/ui");
-  connector = await mod.createTONConnector();
-  const provider = new mod.TONConnectorProvider({ container: $("tonconnect"), connector, useEmbedModal: true });
-  provider.init();
-  connector.on("accountList", (accounts) => {
-    try {
-      const a = (accounts || [])[0];
-      if (a) { myAddress = a.address; balanceNano = a.balance || "0"; }
-      else { myAddress = null; balanceNano = "0"; el.bal.textContent = ""; el.bal.className = ""; }
-      render();
-    } catch (e) { dbg("accountList: " + e); }
+  const TC = window.TON_CONNECT_UI;
+  ui = new TC.TonConnectUI({
+    manifestUrl: location.origin + "/tonconnect-manifest.json",
+    buttonRootId: "tc-button",
+    uiPreferences: { theme: TC.THEME.DARK },
   });
-  connector.on("statusChange", (s) => { if (!s) { myAddress = null; balanceNano = "0"; render(); } });
+  try { await ui.connectionRestored; } catch (e) { dbg("restore: " + e); }
+  ui.connector.onStatusChange(() => refreshAccount());
+  refreshAccount();
 } catch (e) {
-  dbg("TON Connect init: " + (e && e.message || e));
-  status(L === "ru" ? "Не удалось загрузить кошельки. Перезагрузи." : "Failed to load wallets. Reload.", "err");
+  dbg("TON Connect init: " + (e && (e.name + ": " + e.message) || e));
+  status(L === "ru" ? "Не удалось загрузить кошелёк. Перезагрузи страничку." : "Failed to load wallet. Reload the page.", "err");
 }
+
 getRate();
 render();
-dbg("started, plan=" + planKey + ", code=" + code + ", wallet=" + (WALLET || "EMPTY(test mode)"));
-window.addEventListener("error", (e) => dbg("window error: " + e.message));
+dbg("v3 started, plan=" + planKey + ", code=" + code + ", wallet=" + WALLET_FRIENDLY.slice(0, 8) + "…");
 </script>
 </body>
 </html>
