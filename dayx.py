@@ -61,9 +61,12 @@ async def llm_draft(product: str, tagline: str, comment: str):
     )
     cands = []
     if os.getenv("OPENROUTER_API_KEY"):
-        cands.append(("openrouter", "https://openrouter.ai/api/v1/chat/completions",
-                      os.getenv("OPENROUTER_API_KEY"),
-                      os.getenv("LLM_MODEL", "deepseek/deepseek-chat-v3-0324:free")))
+        or_key = os.getenv("OPENROUTER_API_KEY")
+        cands.append(("openrouter", "https://openrouter.ai/api/v1/chat/completions", or_key,
+                      os.getenv("LLM_MODEL", "minimax/minimax-m3:free")))
+        # резерв на OpenRouter: другая модель, если основная упала/урезалась
+        cands.append(("openrouter2", "https://openrouter.ai/api/v1/chat/completions", or_key,
+                      "inclusionai/ling-3.0-flash-fin:free"))
     if os.getenv("CEREBRAS_API_KEY"):
         cands.append(("cerebras", "https://api.cerebras.ai/v1/chat/completions",
                       os.getenv("CEREBRAS_API_KEY"),
@@ -74,7 +77,7 @@ async def llm_draft(product: str, tagline: str, comment: str):
                       os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-V3")))
     for name, url, key, model in cands:
         headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
-        if name == "openrouter":
+        if name.startswith("openrouter"):
             headers["HTTP-Referer"] = "https://launchpilot"
             headers["X-Title"] = "launchpilot"
         try:
