@@ -81,6 +81,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           PH_API_KEY: ${{ secrets.PH_API_KEY }}
           PH_API_SECRET: ${{ secrets.PH_API_SECRET }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 -u bot.py
 
       - name: save offset

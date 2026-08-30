@@ -1,6 +1,12 @@
 """
-Launch Pilot (@PHlaunchpilot_bot) — MVP v0.1.5
-==============================================
+Launch Pilot (@PHlaunchpilot_bot) — v0.4.0 (радар-only модель)
+==============================================================
+v0.4.0: продукт = «Радар на день X» ($19 / ~TON).
+  - новые «за ручку» тексты: бесплатный чек (только PH-ссылки) + гайд бесплатно,
+    радар — один платный (кнопка «💳 Оплатить» -> страница TonConnect на GitHub Pages)
+  - заказ создаётся в state/orders.json (GitHub API), «бухгалтер» (pay-verifier.yml)
+    сверяет сеть каждые 3 минуты, бот сам видит paid и включает премиум (orders_poller)
+  - запуск-автоматизация удалена (решение 2026-08-30)
 v0.1.5: собственный поллинг с «watchdog» — бот сам следит за своими «ушами»:
          если песочница «заснула» и Telegram перестал отвечать (wall-clock > 2.5 мин),
          бот сам сбрасывает сессию и переподключается. Оффсеты — в state_offset.txt.
@@ -28,13 +34,16 @@ v0.1.5: собственный поллинг с «watchdog» — бот сам 
 """
 
 import asyncio
+import base64
 import json
+import math
 import os
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -48,6 +57,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    WebAppInfo,
 )
 
 # ---------- настройки ----------
@@ -65,6 +75,16 @@ def _load_env() -> None:
 _load_env()
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SUPPORT_CHANNEL = "https://t.me/ProductHuntBoosting"  # канал-витрина
+
+# ---------- оплата (v0.4.0) ----------
+# Заказ -> state/orders.json (ветка state). «Бухгалтер» pay-verifier.yml сверяет
+# сеть (toncenter) каждые 3 минуты и помечает paid. orders_poller в этом же боте
+# видит paid и включает премиум + шлёт «радар включён».
+GH_TOKEN = os.environ.get("GH_TOKEN", "").strip()
+REPO_SLUG = os.environ.get("GITHUB_REPOSITORY", "").strip()
+PAY_BASE = "https://timlabss.github.io/launchpilot-pay/"
+RADAR_USD = 19.0
+TON_RATE_FALLBACK = 1.35  # если все курсовые API легли — консервативная оценка
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -143,12 +163,11 @@ def _ts(v) -> str:
 
 
 def _client_kb(uid) -> InlineKeyboardMarkup:
-    """Главное меню: всё кнопками. Кнопка «Админ» — только у админа."""
+    """Главное меню: всё кнопками, коротко. Кнопка «Админ» — только у админа."""
     rows = [
-        [InlineKeyboardButton(text="📡 День X: день запуска", callback_data="dayx")],
-        [InlineKeyboardButton(text="🚀 Подготовить мой запуск — $49", callback_data="prep")],
-        [InlineKeyboardButton(text="📋 Чек-лист", callback_data="checklist"),
-         InlineKeyboardButton(text="❓ Что такое PH", callback_data="what")],
+        [InlineKeyboardButton(text="🔎 Бесплатная проверка", callback_data="check")],
+        [InlineKeyboardButton(text="📖 Гайд к запуску — бесплатно", callback_data="guide")],
+        [InlineKeyboardButton(text="📡 Радар на день X — $19", callback_data="radar")],
         [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
     ]
     if _is_admin(uid):
@@ -671,17 +690,16 @@ def quiz_score(st: dict) -> str:
 
 # ---------- тексты (голос бота: «за ручку») ----------
 
-WELCOME = """Привет! Я Launch Pilot 🚀
+WELCOME = """Привет! Я Launch Pilot 📡
 
-Проведу ваш продукт от «у меня есть идея» до бейджа «Product of the Day» на Product Hunt.
+Смотрю за запуском твоего продукта на Product Hunt в самый день X:
+позиция, каждый комментарий — ответ пишу я, ты просто копируешь и вставляешь.
 
-Как это работает:
-1️⃣ Вы присылаете ссылку на продукт — я бесплатно проверяю и честно говорю, ваш ли это шанс на топ
-2️⃣ Если да — ставлю на план на 6 недель: одна задача в день, все тексты пишу я
-3️⃣ В день запуска сижу на пульте: позиция, каждый комментарий — вы только жмёте кнопки
-4️⃣ Утром — отчёт + список всех, кто комментировал (ваши будущие клиенты)
+Сначала бесплатно:
+• 🔎 Пришли ссылку на свой продукт на PH — покажу, что у тебя уже есть
+• 📖 Гайд — пошаговый план подготовки к запуску
 
-👉 Пришлите ссылку на ваш продукт (https://...) — проверка бесплатная, займёт до минуты."""
+В день запуска — 📡 радар: 19 долларов, всё объясню по кнопке."""
 
 WHAT_IS_PH = """🏛️ Product Hunt — витрина, где каждый день в 00:01 (по Калифорнии) продукты конкурируют за место в топе. Люди голосуют и комментируют, победитель получает бейдж «Product of the Day».
 
@@ -692,6 +710,34 @@ WHAT_IS_PH = """🏛️ Product Hunt — витрина, где каждый д�
 
 Моя работа — довести вас туда по шагам, без чтения 30 англоязычных гайдов.
 Пришлите ссылку на продукт — проверю бесплатно 🙂"""
+
+CHECK_INTRO = """🔎 Бесплатная проверка.
+
+Пришли ссылку на страницу своего продукта на Product Hunt (producthunt.com).
+
+Покажу, что у тебя уже есть: слоган, фото, видео, цифры, комменты — и честно скажу, чего не хватает до запуска.
+
+Только для продуктов, которые уже на PH. Ещё не запустился? Жми «📖 Гайд»."""
+
+RADAR_OFFER = """📡 Радар на день X — 19 долларов
+
+В день запуска я слежу за продуктом за тебя:
+• новый комментарий на PH → я пишу готовый осмысленный ответ — ты копируешь и вставляешь (10 секунд)
+• каждые 2 часа — сводка: позиция, голоса, комменты
+• утром — финальный отчёт + список всех, кто комментировал (твои будущие клиенты)
+
+Оплата одной кнопкой, прямо в твоём кошельке Tonkeeper.
+Как только платёж найдётся в сети (~5 минут), радар включу сам."""
+
+PAY_TEXT = """🧾 Заказ: Радар на день X — {ton} TON (≈$19)
+
+1️⃣ Жми кнопку ниже
+2️⃣ Выбери кошелёк (Tonkeeper) и подтверди перевод
+3️⃣ Всё — я найду платёж в сети и включу радар сам (~5 минут)
+
+Если TON не хватает — пополни прямо в кошельке (обмен внутри): страница сама проверит баланс и не даст уйти впустую."""
+
+NOT_A_LINK = "Я понимаю только ссылки 🙂\nПришлите ссылку на ваш продукт в Product Hunt (producthunt.com) — проверю бесплатно."
 
 CHECKLIST = """📋 Мини-чек-лист (я проведу по нему вас пошагово, каждый день по одной задаче):
 
@@ -721,16 +767,7 @@ CHECKLIST = """📋 Мини-чек-лист (я проведу по нему в
 • 10 директорий, куда закинуть свежий след
 • Бейдж на сайт + «Featured on Product Hunt» в письмах"""
 
-PREP = f"""💳 Оплата (USDT / карта / Telegram Stars) подключается в ближайшие дни.
 
-Пока — делаем всё вручную, результат тот же:
-1) Напишите в канал {SUPPORT_CHANNEL}
-2) Пришлите ссылку на продукт
-3) В течение дня получите план + все тексты (всё то, что скоро будет делать бот сам)
-
-Когда бот докручу до полного автопилота — всё то же, но нажимаешь только кнопки. 🤖"""
-
-NOT_A_LINK = "Я понимаю только ссылки 🙂\nПришлите ссылку на ваш продукт (https://...) или на вашу страницу в Product Hunt — проверю бесплатно."
 
 DAYX_INTRO = (
     "📡 День X: комната комментариев.\n\n"
@@ -756,23 +793,73 @@ async def cb_what(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
-@router.callback_query(F.data == "checklist")
-async def cb_checklist(cb: CallbackQuery) -> None:
+@router.callback_query(F.data.in_({"guide", "checklist"}))
+async def cb_guide(cb: CallbackQuery) -> None:
     await cb.message.answer(CHECKLIST)
     await cb.answer()
 
 
-@router.callback_query(F.data == "prep")
-async def cb_prep(cb: CallbackQuery) -> None:
-    await cb.message.answer(PREP)
+@router.callback_query(F.data == "check")
+async def cb_check(cb: CallbackQuery) -> None:
+    CHECK_WAIT[cb.from_user.id] = True
+    await cb.message.answer(CHECK_INTRO)
     await cb.answer()
 
 
-@router.callback_query(F.data == "dayx")
-async def cb_dayx(cb: CallbackQuery) -> None:
-    DAYX_WAIT[cb.from_user.id] = True
-    await cb.message.answer(DAYX_INTRO)
+@router.callback_query(F.data.in_({"radar", "dayx"}))
+async def cb_radar(cb: CallbackQuery) -> None:
+    """Радар: у клиентов/админа — сразу регистрация запуска, у остальных — оффер + оплата."""
+    uid = cb.from_user.id
+    e = _load_users().get(str(uid), {})
+    if _is_admin(uid) or e.get("premium"):
+        DAYX_WAIT[uid] = True
+        await cb.message.answer(DAYX_INTRO)
+    else:
+        await cb.message.answer(RADAR_OFFER, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить 19 $", callback_data="pay")],
+            [InlineKeyboardButton(text="📖 Сначала гайд", callback_data="guide")],
+        ]))
     await cb.answer()
+
+
+@router.callback_query(F.data == "pay")
+async def cb_pay(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id
+    e = _load_users().get(str(uid), {})
+    if _is_admin(uid) or e.get("premium"):
+        DAYX_WAIT[uid] = True
+        await cb.message.answer(DAYX_INTRO)
+        await cb.answer()
+        return
+    if not (GH_TOKEN and REPO_SLUG):
+        await cb.message.answer(
+            "💳 Оплата сейчас временно недоступна (серверы отдыхают). Минут через 10 — попробуй ещё раз, "
+            "или напиши в 💬 Поддержку."
+        )
+        await cb.answer()
+        return
+    await cb.answer()
+    st = await cb.message.answer("🧾 Создаю заказ...")
+    user_ref = f"@{cb.from_user.username}" if cb.from_user.username else str(uid)
+    order = await create_order(uid, user_ref)
+    if not order:
+        await st.edit_text(
+            "Не получилось создать заказ (сеть подзадержалась). Попробуй ещё раз через минуту — "
+            "или нажми 💬 Поддержка."
+        )
+        return
+    users = _load_users()
+    users[str(uid)]["last_order"] = order["id"]
+    _save_users(users)
+    link = PAY_BASE + "?" + urlencode({
+        "o": order["id"], "t": order["title"], "ton": order["ton"],
+        "n": order["nano"], "m": order["created"],
+    })
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💳 Оплатить {order['ton']} TON", web_app=WebAppInfo(url=link))],
+        [InlineKeyboardButton(text="💬 Не понял — поддержка", callback_data="support")],
+    ])
+    await st.edit_text(PAY_TEXT.format(ton=order["ton"]), reply_markup=kb)
 
 
 @router.callback_query(F.data == "support")
@@ -887,19 +974,170 @@ async def handle_quiz(message: Message) -> None:
         await message.answer(quiz_score(st), reply_markup=_client_kb(message.from_user.id))
 
 
+# ---------- оплата: заказ + опрос «бухгалтера» (v0.4.0) ----------
+
+async def ton_rate() -> float:
+    """Курс TON в USD: Coinbase spot -> CoinGecko -> консервативный fallback."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        for url, pick in (
+            ("https://api.coinbase.com/v2/prices/TON-USD/spot",
+             lambda j: float(((j or {}).get("data") or {}).get("amount") or 0)),
+            ("https://api.coingecko.com/api/v3/simple/price?ids=toncoin&vs_currencies=usd",
+             lambda j: float(((j or {}).get("toncoin") or {}).get("usd") or 0)),
+        ):
+            try:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    v = pick(r.json())
+                    if 0.2 < v < 20:  # здравый диапазон, иначе — следующий источник
+                        return v
+            except Exception:
+                pass
+    return TON_RATE_FALLBACK
+
+
+async def _gh_read_orders() -> tuple[str | None, str | None]:
+    """-> (sha, json-текст) state/orders.json или (None, None)."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"https://api.github.com/repos/{REPO_SLUG}/contents/state/orders.json?ref=state",
+                headers={"Authorization": f"Bearer {GH_TOKEN}", "Accept": "application/vnd.github+json"},
+            )
+            if r.status_code == 404:
+                return None, None
+            if r.status_code != 200:
+                print("orders: read fail", r.status_code, flush=True)
+                return None, None
+            j = r.json()
+            return j.get("sha"), base64.b64decode(j.get("content", "")).decode()
+    except Exception as e:
+        print("orders: read err", repr(e), flush=True)
+        return None, None
+
+
+async def _gh_write_orders(content: str, sha: str | None) -> bool:
+    payload = {
+        "message": "pay: orders update (bot)",
+        "content": base64.b64encode(content.encode()).decode(),
+        "branch": "state",
+    }
+    if sha:
+        payload["sha"] = sha
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.put(
+                f"https://api.github.com/repos/{REPO_SLUG}/contents/state/orders.json",
+                headers={"Authorization": f"Bearer {GH_TOKEN}", "Accept": "application/vnd.github+json"},
+                json=payload,
+            )
+            return r.status_code in (200, 201)
+    except Exception as e:
+        print("orders: write err", repr(e), flush=True)
+        return False
+
+
+async def create_order(uid: int, user_ref: str) -> dict | None:
+    """Создаёт заказ «Радар» в state/orders.json (до 5 попыток против sha-конфликтов)."""
+    rate = await ton_rate()
+    ton = math.ceil(RADAR_USD / rate * 10) / 10  # вверх до 0.1 TON
+    nano = int(round(ton * 1e9))
+    oid = "lp_" + format(int(time.time()), "x") + "".join(
+        random.choices("abcdefghjkmnpqrstuvwxyz23456789", k=4))
+    order = {
+        "id": oid, "chat": uid, "user": user_ref,
+        "title": "Радар на день X", "usd": RADAR_USD,
+        "ton": f"{ton:g}", "nano": str(nano),
+        "created": int(time.time() * 1000), "status": "pending",
+    }
+    for attempt in range(5):
+        sha, text = await _gh_read_orders()
+        doc = {"meta": {"used_tx": []}, "orders": []}
+        if text:
+            try:
+                doc = json.loads(text)
+            except Exception:
+                pass
+        doc.setdefault("meta", {"used_tx": []})
+        doc.setdefault("orders", [])
+        doc["orders"].append(order)
+        if await _gh_write_orders(json.dumps(doc, ensure_ascii=False), sha):
+            print(f"order created: {oid} ton={order['ton']} rate={rate}", flush=True)
+            return order
+        await asyncio.sleep(1 + attempt)
+    return None
+
+
+async def orders_poller(bot: Bot) -> None:
+    """Каждые 45 секунд: новый paid-заказ -> премиум + «радар включён»."""
+    if not (GH_TOKEN and REPO_SLUG):
+        print("💰 orders_poller: нет GH_TOKEN — отключён (оплата не будет подтверждаться)", flush=True)
+        return
+    print("💰 orders_poller: смотрю state/orders.json каждые 45 с", flush=True)
+    while True:
+        await asyncio.sleep(45)
+        try:
+            _, text = await _gh_read_orders()
+            if not text:
+                continue
+            doc = json.loads(text)
+            users = _load_users()
+            changed = False
+            for o in doc.get("orders", []):
+                if o.get("status") != "paid":
+                    continue
+                uid = str(o.get("chat"))
+                e = users.get(uid)
+                if not e or e.get("premium"):
+                    continue
+                e["premium"] = True
+                e.setdefault("paid_orders", []).append(o.get("id"))
+                users[uid] = e
+                changed = True
+                try:
+                    await bot.send_message(
+                        int(uid),
+                        "✅ Платёж найден в сети — радар включён! 📡\n\n" + DAYX_INTRO,
+                    )
+                except Exception as ex:
+                    print("orders_poller: send fail:", repr(ex), flush=True)
+            if changed:
+                _save_users(users)
+                print("orders_poller: premium включён", flush=True)
+        except Exception as ex:
+            print("orders_poller err:", repr(ex), flush=True)
+
+
 # ---------- День X: «комната комментариев» (v0.2.0) ----------
-# Регистрация: /dayx -> клиент шлёт ссылку на запуск -> slug -> API PH.
+# Регистрация: кнопка «📡 Радар» (или /dayx) -> клиент шлёт ссылку на запуск -> slug -> API PH.
 # Дальше радар (dayx_poller) живёт сам: новый комментарий -> черновик ответа.
 # ВАЖНО: регистрируем ДО handle_link, иначе ссылка улетит в бесплатную диагностику.
 
-DAYX_WAIT = {}  # chat_id -> True: ждём ссылку на запуск
+DAYX_WAIT = {}   # chat_id -> True: ждём ссылку на запуск
+CHECK_WAIT = {}  # chat_id -> True: ждём PH-ссылку для бесплатной проверки
+
+RADAR_ENTRY_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="💳 Оплатить 19 $", callback_data="pay")],
+    [InlineKeyboardButton(text="📖 Сначала гайд", callback_data="guide")],
+])
+
+
+def _radar_gate(uid: int) -> bool:
+    """True, если у юзера есть доступ к радару (админ или клиент/премиум)."""
+    if _is_admin(uid):
+        return True
+    return bool(_load_users().get(str(uid), {}).get("premium"))
 
 
 @router.message(F.text.startswith("/dayx"))
 async def cmd_dayx(message: Message) -> None:
-    # запасной вход (главный — кнопка «📡 День X»)
-    DAYX_WAIT[message.from_user.id] = True
-    await message.answer(DAYX_INTRO)
+    # запасной вход (главный — кнопка «📡 Радар»)
+    uid = message.from_user.id
+    if _radar_gate(uid):
+        DAYX_WAIT[uid] = True
+        await message.answer(DAYX_INTRO)
+    else:
+        await message.answer(RADAR_OFFER, reply_markup=RADAR_ENTRY_KB)
 
 
 @router.message(F.text, lambda m: m.from_user.id in ADMIN_MODE)
@@ -1052,6 +1290,15 @@ async def handle_link(message: Message) -> None:
     url = re.search(r"https?://\S+", message.text).group(0)
     is_ph = "producthunt.com" in url
 
+    if message.from_user.id in CHECK_WAIT:
+        CHECK_WAIT.pop(message.from_user.id, None)
+        if not is_ph:
+            await message.answer(
+                "Бесплатная проверка — только для продуктов, которые уже на Product Hunt. "
+                "Пришли ссылку вида https://www.producthunt.com/posts/твой-продукт 🙂"
+            )
+            return
+
     if is_ph:
         # каскад: официальный API (мгновенно) -> открытый поиск (мгновенно)
         #         -> веб-архив (2-4 мин) -> вопросы
@@ -1198,12 +1445,13 @@ async def resilient_polling(bot: Bot) -> None:
 async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     await bot.set_my_commands([
-        BotCommand(command="start", description="Старт — бесплатная проверка продукта"),
-        BotCommand(command="dayx", description="День X: радар комментариев запуска"),
+        BotCommand(command="start", description="Старт — бесплатная проверка + гайд"),
+        BotCommand(command="dayx", description="Радар на день запуска (платный)"),
     ])
     me = await bot.me()
-    print(f"🤖 Бот @{me.username} запущен (v0.3.0: кнопки, админка, тикеты, радар День X)", flush=True)
+    print(f"🤖 Бот @{me.username} запущен (v0.4.0: радар-only, оплата TON, автоподключение)", flush=True)
     asyncio.create_task(dayx.dayx_poller(bot))
+    asyncio.create_task(orders_poller(bot))
     await resilient_polling(bot)
 
 
