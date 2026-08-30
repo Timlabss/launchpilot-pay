@@ -18,25 +18,98 @@ jobs:
           GH: ${{ github.token }}
         run: |
           set +e
-          LATEST=$(curl -s -H "Authorization: Bearer $GH" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot-runner.yml/runs?per_page=5" \
-            | python3 -c "
+          REPO="${{ github.repository }}"
+
+          # 1) живой ран бота?
+          RUN_JSON=$(curl -s -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/runs?per_page=5")
+          ALIVE_ID=$(echo "$RUN_JSON" | python3 -c "
           import sys, json
-          alive = 'none'
           try:
               runs = json.load(sys.stdin).get('workflow_runs', [])
               for r in runs:
                   if r['status'] in ('queued', 'in_progress'):
-                      alive = r['status']
-                      break
+                      print(r['id']); break
           except Exception:
               pass
-          print(alive)
           ")
-          echo "runner: $LATEST"
-          if [ "$LATEST" = "none" ]; then
+          RUN_AGE=999999
+          if [ -n "$ALIVE_ID" ]; then
+            RUN_AGE=$(echo "$RUN_JSON" | python3 -c "
+          import sys, json, datetime
+          try:
+              runs = json.load(sys.stdin).get('workflow_runs', [])
+              for r in runs:
+                  if r['status'] in ('queued', 'in_progress'):
+                      t = r.get('started_at') or r.get('created_at')
+                      dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
+                      print(int((datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds()))
+                      break
+          except Exception:
+              print(999999)
+          ")
+          fi
+          echo "alive_id=${ALIVE_ID:-none} run_age=${RUN_AGE}s"
+
+          # 2) маяк бота (state/heartbeat.txt: epoch|run_id|poll_age)
+          HB_RAW=$(curl -s "https://raw.githubusercontent.com/$REPO/state/state/heartbeat.txt")
+          echo "heartbeat: $(echo "$HB_RAW" | head -c 100)"
+          HB_STATE=$(echo "$HB_RAW" | python3 -c "
+          import sys, time
+          lines = [x for x in sys.stdin.read().strip().splitlines() if x.strip()]
+          if not lines:
+              print('none'); sys.exit()
+          parts = lines[-1].split('|')
+          if len(parts) != 3:
+              print('bad'); sys.exit()
+          try:
+              ts, run_id, poll_age = int(parts[0]), parts[1], int(parts[2])
+          except ValueError:
+              print('bad'); sys.exit()
+          if int(time.time()) - ts < 480 and poll_age < 300:
+              print('ok')
+          else:
+              print('stale')
+          ")
+          HB_RUN=$(echo "$HB_RAW" | python3 -c "
+          import sys
+          lines = [x for x in sys.stdin.read().strip().splitlines() if x.strip()]
+          try:
+              print(lines[-1].split('|')[1])
+          except Exception:
+              print('')
+          ")
+
+          # 3) решение
+          if [ -z "$ALIVE_ID" ]; then
+            echo "🚀 бота нет — запускаю"
             curl -s -o /dev/null -w "dispatch http=%{http_code}\n" \
               -X POST -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot-runner.yml/dispatches" \
+              "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/dispatches" \
               -d '{"ref":"main"}'
+            exit 0
           fi
+
+          HEALTHY=1
+          if [ "$RUN_AGE" -lt 600 ]; then
+            HEALTHY=1   # ран молод: старт ещё может вестись (маяка может не быть)
+          elif [ "$HB_STATE" = "ok" ] && [ "$HB_RUN" = "$ALIVE_ID" ]; then
+            HEALTHY=1   # маяк свежий и от этого самого рана
+          else
+            HEALTHY=0   # ран молчит (Telegram не слышен / завис) — убиваем
+          fi
+
+          if [ "$HEALTHY" = "1" ]; then
+            echo "✅ бот здоров — не трогаю"
+            exit 0
+          fi
+
+          echo "🛑 ран $ALIVE_ID молчит (маяк: $HB_STATE) — убиваю и запускаю новый"
+          curl -s -o /dev/null -w "cancel http=%{http_code}\n" -X POST \
+            -H "Authorization: Bearer $GH" \
+            "https://api.github.com/repos/$REPO/actions/runs/$ALIVE_ID/cancel"
+          sleep 25
+          curl -s -o /dev/null -w "dispatch http=%{http_code}\n" \
+            -X POST -H "Authorization: Bearer $GH" -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/dispatches" \
+            -d '{"ref":"main"}'

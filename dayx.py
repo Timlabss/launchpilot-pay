@@ -17,6 +17,8 @@ from pathlib import Path
 
 import httpx
 
+from i18n import T
+
 STATE_FILE = Path(__file__).parent / "dayx.json"
 PH_GQL_URL = "https://api.producthunt.com/v2/api/graphql"
 PH_TOKEN_URL = "https://api.producthunt.com/v2/oauth/token"
@@ -26,6 +28,7 @@ PH_API_SECRET = os.getenv("PH_API_SECRET", "")
 POLL_SECS = 120          # новый комментарий ловим за ~2 минуты
 SUMMARY_EVERY = 7200     # сводка каждые 2 часа
 WAIT_PING = 4 * 3600     # «ждём публичный запуск» — напоминаем раз в 4 часа
+FREE_STATUS_EVERY = 10800  # бесплатному режиму — цифры каждые 3 часа
 END_AFTER = 26 * 3600    # день запуска закончился
 
 _tok = {"tok": None, "at": 0.0}
@@ -217,20 +220,32 @@ async def dayx_poller(bot) -> None:
         await asyncio.sleep(POLL_SECS)
 
 
+def _is_premium(chat_id: int) -> bool:
+    """Премиум (или админ) = полный радар: ответы на комменты, сводки, отчёт."""
+    try:
+        if os.getenv("ADMIN_CHAT_ID", "") == str(chat_id):
+            return True
+        users = json.loads((Path(__file__).parent / "users.json").read_text())
+        return bool(users.get(str(chat_id), {}).get("premium"))
+    except Exception:
+        return False
+
+
 async def _tick(bot, state: dict) -> None:
     if not state:
         return
     for slug, st in list(state.items()):
         if st.get("finished"):
             continue
+        chat_id = st.get("chat_id")
+        premium = _is_premium(chat_id)
         post, comments = await fetch_launch(slug)
         if post is None:
             # ещё не публичный — мягко напоминаем, что ждём
             if time.time() - st.get("last_wait", 0) > WAIT_PING:
                 st["last_wait"] = time.time()
                 try:
-                    await bot.send_message(st["chat_id"],
-                                           "⏳ Запуск ещё не стал публичным — продолжаю следить (каждые 2 минуты).")
+                    await bot.send_message(chat_id, T(chat_id, "wx_wait"))
                 except Exception:
                     pass
             save_state(state)
@@ -239,44 +254,59 @@ async def _tick(bot, state: dict) -> None:
         if not st.get("seen_live"):
             st["seen_live"] = True
             live = (post.get("featuredAt") or post.get("createdAt") or "")[:16].replace("T", " ")
+            key = "wx_live_full" if premium else "wx_live_free"
             try:
-                await bot.send_message(
-                    st["chat_id"],
-                    f"🚀 {post.get('name')} — LIVE на Product Hunt (с {live} UTC).\n"
-                    "Радар на полном ходу: за каждый новый комментарий пришлю готовый ответ.")
+                await bot.send_message(chat_id, T(chat_id, key, name=post.get("name"), live=live))
             except Exception:
                 pass
 
         seen = set(st.get("seen", []))
         new = [c for c in comments if c["id"] not in seen]
-        for c in new[:10]:
-            seen.add(c["id"])
-            draft = await llm_draft(post.get("name", ""), post.get("tagline", ""), c["body"])
-            draft = draft or template_reply(c["body"])
-            who = (c["user"] + " ") if c.get("user") else ""
-            wt = (c.get("createdAt") or "")[:16].replace("T", " ")
-            txt = (f"💬 Новый комментарий ({wt} UTC, {who}{c.get('followers', 0)} подписчиков):\n"
-                   f"“{c['body'][:450]}”\n\n"
-                   f"→ Ответ (долгое нажатие → копировать → вставить в поле комментария на PH):\n"
-                   f"“{draft[:600]}”")
-            try:
-                await bot.send_message(st["chat_id"], txt)
-            except Exception as e:
-                print("⚠️ день X отправка:", repr(e), flush=True)
+        if premium:
+            for c in new[:10]:
+                seen.add(c["id"])
+                draft = await llm_draft(post.get("name", ""), post.get("tagline", ""), c["body"])
+                draft = draft or template_reply(c["body"])
+                who = (c["user"] + " ") if c.get("user") else ""
+                wt = (c.get("createdAt") or "")[:16].replace("T", " ")
+                txt = T(chat_id, "wx_comment", wt=wt, who=who, f=c.get("followers", 0),
+                        body=c["body"][:450], draft=draft[:600])
+                try:
+                    await bot.send_message(chat_id, txt)
+                except Exception as e:
+                    print("⚠️ день X отправка:", repr(e), flush=True)
+        else:
+            # бесплатный режим: комменты не шлём (только цифры), помечаем прочитанными
+            for c in new:
+                seen.add(c["id"])
         st["seen"] = list(seen)[-600:]
         st["last_votes"] = post.get("votesCount")
-
-        if time.time() - st.get("last_summary", 0) > SUMMARY_EVERY:
-            st["last_summary"] = time.time()
-            rank = await fetch_today_rank(post.get("votesCount", 0) or 0)
-            st["last_rank"] = rank
-            try:
-                await bot.send_message(
-                    st["chat_id"],
-                    f"📊 Сводка радара:\n"
-                    f"Голоса: {post.get('votesCount')} · Комментариев: {post.get('commentsCount')} · Позиция дня: №{rank}")
-            except Exception:
-                pass
+        now = time.time()
+        if premium:
+            if now - st.get("last_summary", 0) > SUMMARY_EVERY:
+                st["last_summary"] = now
+                rank = await fetch_today_rank(post.get("votesCount", 0) or 0)
+                st["last_rank"] = rank
+                try:
+                    await bot.send_message(chat_id, T(chat_id, "wx_summary",
+                                                       votes=post.get("votesCount"),
+                                                       comments=post.get("commentsCount"),
+                                                       rank=rank))
+                except Exception:
+                    pass
+        else:
+            if now - st.get("last_free_status", 0) > FREE_STATUS_EVERY:
+                st["last_free_status"] = now
+                rank = st.get("last_rank") or await fetch_today_rank(post.get("votesCount", 0) or 0)
+                st["last_rank"] = rank
+                try:
+                    await bot.send_message(chat_id, T(chat_id, "wx_free_status",
+                                                       name=post.get("name"),
+                                                       votes=post.get("votesCount"),
+                                                       comments=post.get("commentsCount"),
+                                                       rank=rank))
+                except Exception:
+                    pass
 
         live_iso = post.get("featuredAt") or post.get("createdAt") or ""
         if live_iso:
@@ -286,11 +316,10 @@ async def _tick(bot, state: dict) -> None:
                 if age > END_AFTER:
                     st["finished"] = True
                     try:
-                        await bot.send_message(
-                            st["chat_id"],
-                            f"🏁 День запуска завершён.\n"
-                            f"Итог: {post.get('votesCount')} голосов, {post.get('commentsCount')} комментариев, "
-                            f"позиция №{st.get('last_rank', '—')}.\nОтличная работа — до новых запусков! 🚀")
+                        await bot.send_message(chat_id, T(chat_id, "wx_finish",
+                                                           votes=post.get("votesCount"),
+                                                           comments=post.get("commentsCount"),
+                                                           rank=st.get("last_rank", "—")))
                     except Exception:
                         pass
             except Exception:

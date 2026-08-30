@@ -49,6 +49,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 import dayx
+from i18n import T
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -163,16 +164,24 @@ def _ts(v) -> str:
 
 
 def _client_kb(uid) -> InlineKeyboardMarkup:
-    """Главное меню: всё кнопками, коротко. Кнопка «Админ» — только у админа."""
+    """Главное меню: День X + поддержка + язык. Кнопка «Админ» — только у админа."""
     rows = [
-        [InlineKeyboardButton(text="🔎 Бесплатная проверка", callback_data="check")],
-        [InlineKeyboardButton(text="📖 Гайд к запуску — бесплатно", callback_data="guide")],
-        [InlineKeyboardButton(text="📡 Радар на день X — $19", callback_data="radar")],
-        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
+        [InlineKeyboardButton(text=T(uid, "btn_radar"), callback_data="radar")],
+        [InlineKeyboardButton(text=T(uid, "btn_support"), callback_data="support")],
+        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru"),
+         InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")],
     ]
     if _is_admin(uid):
         rows.append([InlineKeyboardButton(text="⚙️ Админ", callback_data="admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _pay_kb(uid) -> InlineKeyboardMarkup:
+    """Кнопки после подключения радара (для не-премиум): оплата + поддержка."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T(uid, "btn_pay"), callback_data="pay")],
+        [InlineKeyboardButton(text=T(uid, "btn_help"), callback_data="support")],
+    ])
 
 # ---------- «глаза»: живые слои ----------
 # Слой 0 (для PH): собственная открытая витрина-поиск Product Hunt (Algolia) —
@@ -360,63 +369,110 @@ def _fmt_date(iso: str) -> str:
     return f"{d[8:10]}.{d[5:7]}.{d[0:4]}"
 
 
-def analyze_ph_api(post: dict) -> str:
-    """Диагностика по официальному API (самый авторитетный слой)."""
-    name = post.get("name", "продукт")
+def analyze_ph_api(post: dict, uid) -> str:
+    """Диагностика по официальному API PH (самый авторитетный слой). i18n."""
+    name = post.get("name") or "продукт"
     tagline = post.get("tagline") or ""
     votes = post.get("votesCount") or 0
     comments = post.get("commentsCount") or 0
     featured_at = post.get("featuredAt")
-    media = [m for m in (post.get("media") or []) if isinstance(m, dict)]
-    has_video = any(m.get("type") == "video" or m.get("videoUrl") for m in media)
-    n_img = sum(1 for m in media if m.get("type") == "image")
+    media = post.get("media") or []
+    has_video = any(m.get("type") == "video" or m.get("videoUrl")
+                    for m in media if isinstance(m, dict))
+    n_img = sum(1 for m in media if isinstance(m, dict) and m.get("type") == "image")
     topics = [t.get("name") for t in ((post.get("topics") or {}).get("nodes") or [])
               if t.get("name")][:5]
 
     score = 15
-    lines = [f"🔍 Посмотрел {name} — официальные живые данные Product Hunt (API)"]
-
+    lines = [T(uid, "an_api", name=name)]
     if featured_at:
         score += 5
-        lines.append(f"✅ Фичерен на PH (запуск: {_fmt_date(featured_at)})")
+        lines.append(T(uid, "an_featured", date=_fmt_date(featured_at)))
     else:
-        lines.append("ℹ️ Публичный запуск ещё не состоялся (coming soon / запланирован)")
-
+        lines.append(T(uid, "an_coming"))
     if len(tagline) >= 40:
         score += 10
-        lines.append(f"✅ Слоган «мясо» ({len(tagline)} символов): «{tagline[:70]}»")
+        lines.append(T(uid, "an_tag_meat", n=len(tagline), v=tagline[:70]))
     elif tagline:
         score += 5
-        lines.append(f"⚠️ Слоган короткий ({len(tagline)} символов) — лучше одна конкретная выгода")
+        lines.append(T(uid, "an_tag_short", n=len(tagline)))
     else:
-        lines.append("⚠️ Слогана нет — без него продукт не продать")
-
+        lines.append(T(uid, "an_tag_no"))
     if has_video:
         score += 15
-        lines.append("✅ Есть видео! Самый ценный актив для PH")
+        lines.append(T(uid, "an_video"))
     else:
-        lines.append("⚠️ Видео не нашёл — демо на 60 секунд даёт самый большой прирост")
-
+        lines.append(T(uid, "an_novideo"))
     if n_img >= 4:
         score += 5
-        lines.append(f"✅ Галерея полная ({n_img} изображений)")
-    elif media:
+        lines.append(T(uid, "an_gal_full", n=n_img))
+    elif n_img:
         score += 3
-        lines.append(f"⚠️ Галерея тонкая ({len(media)} актива — рекомендуется 4+ изображения)")
+        lines.append(T(uid, "an_gal_thin", n=n_img))
     else:
-        lines.append("⚠️ Изображений нет вовсе — галерея из 4 картинок обязательна")
-
+        lines.append(T(uid, "an_gal_no"))
     if comments >= 10:
         score += 5
-        lines.append(f"✅ Комьюнити живое: {comments} комментариев")
-
-    lines.append(f"📊 Живые цифры: {votes} очков, {comments} комментариев")
+        lines.append(T(uid, "an_comm", n=comments))
+    lines.append(T(uid, "an_numbers", votes=votes, comments=comments))
     if topics:
-        lines.append("🏷️ Категории: " + ", ".join(topics))
+        lines.append(T(uid, "an_topics", topics=", ".join(topics)))
+    return "\n".join(lines) + T(uid, "score_line",
+                                 now=min(score, 60), prep=min(score + 30, 90),
+                                 note=T(uid, "note_api"))
 
-    return "\n".join(lines) + _score_line(
-        score, score + 30, "(данные — официальный API Product Hunt, живые)"
-    )
+
+def analyze_ph_live(hit: dict, uid) -> str:
+    """Диагностика по живым данным открытого поиска PH. i18n."""
+    name = hit.get("name") or "продукт"
+    tagline = hit.get("tagline") or ""
+    votes = hit.get("vote_count", 0) or 0
+    comments = hit.get("comments_count", 0) or 0
+    featured = bool(hit.get("is_featured"))
+    media = [m for m in (hit.get("media") or []) if isinstance(m, dict)]
+    has_video = any("video" in str(m.get("type", "")).lower() or "youtube" in str(m.get("url", "")).lower()
+                    for m in media)
+    n_img = sum(1 for m in media
+                if "image" in str(m.get("type", "")).lower() or "image" in str(m.get("url", "")).lower())
+    topics = [t.get("name") for t in (hit.get("topics") or []) if isinstance(t, dict)][:5]
+
+    score = 15
+    lines = [T(uid, "an_live", name=name)]
+    if featured:
+        score += 5
+        lines.append(T(uid, "an_featured_short"))
+    else:
+        lines.append(T(uid, "an_coming"))
+    if len(tagline) >= 40:
+        score += 10
+        lines.append(T(uid, "an_tag_meat", n=len(tagline), v=tagline[:70]))
+    elif tagline:
+        score += 5
+        lines.append(T(uid, "an_tag_short", n=len(tagline)))
+    else:
+        lines.append(T(uid, "an_tag_no"))
+    if has_video:
+        score += 15
+        lines.append(T(uid, "an_video"))
+    else:
+        lines.append(T(uid, "an_novideo"))
+    if n_img >= 4:
+        score += 5
+        lines.append(T(uid, "an_gal_full", n=n_img))
+    elif n_img:
+        score += 3
+        lines.append(T(uid, "an_gal_thin", n=n_img))
+    else:
+        lines.append(T(uid, "an_gal_no"))
+    if comments >= 10:
+        score += 5
+        lines.append(T(uid, "an_comm", n=comments))
+    lines.append(T(uid, "an_numbers", votes=votes, comments=comments))
+    if topics:
+        lines.append(T(uid, "an_topics", topics=", ".join(topics)))
+    return "\n".join(lines) + T(uid, "score_line",
+                                 now=min(score, 60), prep=min(score + 30, 90),
+                                 note=T(uid, "note_live"))
 
 
 def _source_note(source: str) -> str:
@@ -690,136 +746,34 @@ def quiz_score(st: dict) -> str:
 
 # ---------- тексты (голос бота: «за ручку») ----------
 
-WELCOME = """Привет! Я Launch Pilot 📡
-
-Смотрю за запуском твоего продукта на Product Hunt в самый день X:
-позиция, каждый комментарий — ответ пишу я, ты просто копируешь и вставляешь.
-
-Сначала бесплатно:
-• 🔎 Пришли ссылку на свой продукт на PH — покажу, что у тебя уже есть
-• 📖 Гайд — пошаговый план подготовки к запуску
-
-В день запуска — 📡 радар: 19 долларов, всё объясню по кнопке."""
-
-WHAT_IS_PH = """🏛️ Product Hunt — витрина, где каждый день в 00:01 (по Калифорнии) продукты конкурируют за место в топе. Люди голосуют и комментируют, победитель получает бейдж «Product of the Day».
-
-Почему фаундеры запускаются там:
-• Бейдж = «нас заметили» — строка на сайте, в презентациях и холодных письмах
-• Бесплатная ссылка с очень авторитетного сайта (SEO это очень ценит)
-• Первые 500–5000 посетителей + список тех, кому продукт реально интересен
-
-Моя работа — довести вас туда по шагам, без чтения 30 англоязычных гайдов.
-Пришлите ссылку на продукт — проверю бесплатно 🙂"""
-
-CHECK_INTRO = """🔎 Бесплатная проверка.
-
-Пришли ссылку на страницу своего продукта на Product Hunt (producthunt.com).
-
-Покажу, что у тебя уже есть: слоган, фото, видео, цифры, комменты — и честно скажу, чего не хватает до запуска.
-
-Только для продуктов, которые уже на PH. Ещё не запустился? Жми «📖 Гайд»."""
-
-RADAR_OFFER = """📡 Радар на день X — 19 долларов
-
-В день запуска я слежу за продуктом за тебя:
-• новый комментарий на PH → я пишу готовый осмысленный ответ — ты копируешь и вставляешь (10 секунд)
-• каждые 2 часа — сводка: позиция, голоса, комменты
-• утром — финальный отчёт + список всех, кто комментировал (твои будущие клиенты)
-
-Оплата одной кнопкой, прямо в твоём кошельке Tonkeeper.
-Как только платёж найдётся в сети (~5 минут), радар включу сам."""
-
-PAY_TEXT = """🧾 Заказ: Радар на день X — {ton} TON (≈$19)
-
-Жми кнопку — откроется экран оплаты:
-1️⃣ Подключи кошелёк (или вставь адрес из @wallet — он запомнится)
-2️⃣ Экран проверит баланс: не хватит — напишет, сколько докинуть
-3️⃣ Жмёшь «📤 Перевести» — кошелёк открывается с готовыми суммой и адресом, ты только подтверждаешь
-
-Дальше я сам найду платёж в сети и включу радар (~5 минут)."""
-
-NOT_A_LINK = "Я понимаю только ссылки 🙂\nПришлите ссылку на ваш продукт в Product Hunt (producthunt.com) — проверю бесплатно."
-
-CHECKLIST = """📋 Мини-чек-лист (я проведу по нему вас пошагово, каждый день по одной задаче):
-
-Недели 1–2 — «разогрев»:
-• Профиль PH: фото, имя, одна строка «кто вы»
-• 3 полезных комментария в день у запусков вашей категории
-• Дата: вт–чт (максимум трафика) или выходные (шанс на #1)
-
-Недели 3–4 — контенты:
-• Видео на 60 секунд (самый важный актив!)
-• 4 картинки в галерею
-• Слоган: до 60 символов, одна конкретная выгода
-• Первый комментарий «от основателя»: история, не реклама
-
-Недели 5–6 — аудитория:
-• Список 200–400 «тёплых» людей (друзья, подписчики, клиенты)
-• Личное сообщение каждому (не копия-вставка!)
-• Лендинг: место под бейдж + ссылка на PH
-
-День запуска:
-• 00:01 по Калифорнии — публикация, первый комментарий за 5 минут
-• Ответ на каждый комментарий за 15 минут, 6 часов
-• Позиция ниже топ-10? — второй публичный пост
-
-После (48 часов):
-• Спасибо каждому комментатору (это лиды!)
-• 10 директорий, куда закинуть свежий след
-• Бейдж на сайт + «Featured on Product Hunt» в письмах"""
-
-
-
-DAYX_INTRO = (
-    "📡 День X: комната комментариев.\n\n"
-    "Пришли ссылку на свой запуск на Product Hunt (или на страницу продукта):\n"
-    "https://www.producthunt.com/posts/твой-продукт\n\n"
-    "Что будет дальше:\n"
-    "• новый комментарий → я мгновенно пишу ответ за тебя (под твой продукт)\n"
-    "• ты копируешь текст и вставляешь в PH (10 секунд)\n"
-    "• каждые 2 часа — сводка: голоса, комментарии, позиция дня\n"
-    "• конец дня запуска — финальный отчёт + список тех, кто комментировал"
-)
+# Тексты пользователя — в i18n.py (RU/EN). Точка доступа: T(uid, "ключ").
 
 # ---------- обработчики (порядок важен: quiz -> ссылка -> прочее) ----------
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    await message.answer(WELCOME, reply_markup=_client_kb(message.from_user.id))
+    await message.answer(T(message.from_user.id, "welcome"),
+                         reply_markup=_client_kb(message.from_user.id))
 
 
-@router.callback_query(F.data == "what")
-async def cb_what(cb: CallbackQuery) -> None:
-    await cb.message.answer(WHAT_IS_PH)
-    await cb.answer()
-
-
-@router.callback_query(F.data.in_({"guide", "checklist"}))
-async def cb_guide(cb: CallbackQuery) -> None:
-    await cb.message.answer(CHECKLIST)
-    await cb.answer()
-
-
-@router.callback_query(F.data == "check")
-async def cb_check(cb: CallbackQuery) -> None:
-    CHECK_WAIT[cb.from_user.id] = True
-    await cb.message.answer(CHECK_INTRO)
+@router.callback_query(F.data.in_({"lang_ru", "lang_en"}))
+async def cb_lang(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id
+    users = _load_users()
+    users.setdefault(str(uid), {})["lang"] = "ru" if cb.data == "lang_ru" else "en"
+    _save_users(users)
+    key = "lang_set_ru" if cb.data == "lang_ru" else "lang_set_en"
+    await cb.message.answer(T(uid, key), reply_markup=_client_kb(uid))
     await cb.answer()
 
 
 @router.callback_query(F.data.in_({"radar", "dayx"}))
 async def cb_radar(cb: CallbackQuery) -> None:
-    """Радар: у клиентов/админа — сразу регистрация запуска, у остальных — оффер + оплата."""
+    """День X: все сначала присылают ссылку на запуск.
+    Диагностика + радар (бесплатно) — сразу; оплата — кнопкой, после результата."""
     uid = cb.from_user.id
-    e = _load_users().get(str(uid), {})
-    if _is_admin(uid) or e.get("premium"):
-        DAYX_WAIT[uid] = True
-        await cb.message.answer(DAYX_INTRO)
-    else:
-        await cb.message.answer(RADAR_OFFER, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить 19 $", callback_data="pay")],
-            [InlineKeyboardButton(text="📖 Сначала гайд", callback_data="guide")],
-        ]))
+    DAYX_WAIT[uid] = True
+    await cb.message.answer(T(uid, "dayx_ask"), reply_markup=_client_kb(uid))
     await cb.answer()
 
 
@@ -828,15 +782,11 @@ async def cb_pay(cb: CallbackQuery) -> None:
     uid = cb.from_user.id
     e = _load_users().get(str(uid), {})
     if _is_admin(uid) or e.get("premium"):
-        DAYX_WAIT[uid] = True
-        await cb.message.answer(DAYX_INTRO)
+        await cb.message.answer(T(uid, "already_premium"))
         await cb.answer()
         return
     if not (GH_TOKEN and REPO_SLUG):
-        await cb.message.answer(
-            "💳 Оплата сейчас временно недоступна (серверы отдыхают). Минут через 10 — попробуй ещё раз, "
-            "или напиши в 💬 Поддержку."
-        )
+        await cb.message.answer(T(uid, "pay_unavail"))
         await cb.answer()
         return
     await cb.answer()
@@ -845,13 +795,10 @@ async def cb_pay(cb: CallbackQuery) -> None:
 
 async def _open_pay_screen(uid: int, user_ref: str, reply) -> None:
     """Заказ + экран оплаты (WebApp) с проверкой баланса."""
-    st = await reply.answer("🧾 Создаю заказ...")
+    st = await reply.answer(T(uid, "order_creating"))
     order = await create_order(uid, user_ref)
     if not order:
-        await st.edit_text(
-            "Не получилось создать заказ (сеть подзадержалась). Попробуй ещё раз через минуту — "
-            "или нажми 💬 Поддержка."
-        )
+        await st.edit_text(T(uid, "order_fail"))
         return
     users = _load_users()
     users[str(uid)]["last_order"] = order["id"]
@@ -861,10 +808,11 @@ async def _open_pay_screen(uid: int, user_ref: str, reply) -> None:
         "n": order["nano"], "m": order["created"],
     })
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"💳 Оплатить {order['ton']} TON", web_app=WebAppInfo(url=link))],
-        [InlineKeyboardButton(text="💬 Не понял — поддержка", callback_data="support")],
+        [InlineKeyboardButton(text=T(uid, "btn_pay_ton", ton=order["ton"]),
+                              web_app=WebAppInfo(url=link))],
+        [InlineKeyboardButton(text=T(uid, "btn_help"), callback_data="support")],
     ])
-    await st.edit_text(PAY_TEXT.format(ton=order["ton"]), reply_markup=kb)
+    await st.edit_text(T(uid, "pay_text", ton=order["ton"]), reply_markup=kb)
 
 
 @router.callback_query(F.data == "support")
@@ -874,10 +822,7 @@ async def cb_support(cb: CallbackQuery) -> None:
         await cb.answer()
         return
     SUPPORT_WAIT[cb.from_user.id] = True
-    await cb.message.answer(
-        "💬 Напиши свой вопрос — сразу уйдёт админу (он увидит тебя и твой ID).\n"
-        "Ответ придёт прямо в этот чат."
-    )
+    await cb.message.answer(T(cb.from_user.id, "support_ask"))
     await cb.answer()
 
 
@@ -1100,10 +1045,7 @@ async def orders_poller(bot: Bot) -> None:
                 users[uid] = e
                 changed = True
                 try:
-                    await bot.send_message(
-                        int(uid),
-                        "✅ Платёж найден в сети — радар включён! 📡\n\n" + DAYX_INTRO,
-                    )
+                    await bot.send_message(int(uid), T(uid, "premium_on"))
                 except Exception as ex:
                     print("orders_poller: send fail:", repr(ex), flush=True)
             if changed:
@@ -1118,13 +1060,7 @@ async def orders_poller(bot: Bot) -> None:
 # Дальше радар (dayx_poller) живёт сам: новый комментарий -> черновик ответа.
 # ВАЖНО: регистрируем ДО handle_link, иначе ссылка улетит в бесплатную диагностику.
 
-DAYX_WAIT = {}   # chat_id -> True: ждём ссылку на запуск
-CHECK_WAIT = {}  # chat_id -> True: ждём PH-ссылку для бесплатной проверки
-
-RADAR_ENTRY_KB = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="💳 Оплатить 19 $", callback_data="pay")],
-    [InlineKeyboardButton(text="📖 Сначала гайд", callback_data="guide")],
-])
+DAYX_WAIT = {}   # chat_id -> True: ждём ссылку на запуск (после «📡 День X»)
 
 
 def _radar_gate(uid: int) -> bool:
@@ -1136,13 +1072,10 @@ def _radar_gate(uid: int) -> bool:
 
 @router.message(F.text.startswith("/dayx"))
 async def cmd_dayx(message: Message) -> None:
-    # запасной вход (главный — кнопка «📡 Радар»)
+    # запасной вход (главный — кнопка «📡 День X»)
     uid = message.from_user.id
-    if _radar_gate(uid):
-        DAYX_WAIT[uid] = True
-        await message.answer(DAYX_INTRO)
-    else:
-        await message.answer(RADAR_OFFER, reply_markup=RADAR_ENTRY_KB)
+    DAYX_WAIT[uid] = True
+    await message.answer(T(uid, "dayx_ask"), reply_markup=_client_kb(uid))
 
 
 @router.message(F.text, lambda m: m.from_user.id in ADMIN_MODE)
@@ -1208,7 +1141,7 @@ async def handle_support_msg(message: Message) -> None:
                 admin_uid = int(uid)
                 break
     if not admin_uid:
-        await message.answer("Поддержка сейчас не подключена. Напиши в канал https://t.me/ProductHuntBoosting")
+        await message.answer(T(u.id, "support_na"))
         return
     un = f"@{u.username}" if u.username else "без username"
     try:
@@ -1219,9 +1152,9 @@ async def handle_support_msg(message: Message) -> None:
                 [InlineKeyboardButton(text="↩️ Ответить", callback_data=f"rply_{u.id}")],
             ]),
         )
-        await message.answer("✅ Вопрос ушёл админу. Ответ придёт прямо в этот чат.")
+        await message.answer(T(u.id, "support_sent"))
     except Exception:
-        await message.answer("Не смог отправить админу. Напиши в канал https://t.me/ProductHuntBoosting")
+        await message.answer(T(u.id, "support_na"))
 
 
 @router.message(F.text.regexp(r"https?://\S+"),
@@ -1230,119 +1163,73 @@ async def handle_dayx_link(message: Message) -> None:
     uid = message.from_user.id
     DAYX_WAIT.pop(uid, None)
     url = re.search(r"https?://\S+", message.text).group(0)
-
     if "producthunt.com" not in url:
-        await message.answer(
-            "Нужна ссылка именно на Product Hunt (producthunt.com), например:\n"
-            "https://www.producthunt.com/posts/твой-продукт\n\n"
-            "Пришли её — подключу радар."
-        )
+        await message.answer(T(uid, "link_only_ph"))
         return
+    await _connect_launch(uid, url, message)
 
-    status = await message.answer("🔎 Нахожу запуск в официальном API Product Hunt...")
+
+async def _connect_launch(uid: int, url: str, message) -> None:
+    """Ссылка на запуск -> диагностика (как в бесплатной проверке) +
+    подключение радара (бесплатно: цифры) + кнопка полного радара (после результата)."""
+    status = await message.answer(T(uid, "loading"))
+    slugs = ph_slug_from_url(url)
     found, found_slug = None, None
     async with httpx.AsyncClient(timeout=25) as api_client:
-        for sl in ph_slug_from_url(url):
+        for sl in slugs:
             f = await ph_api_lookup(api_client, sl)
             if f:
                 found, found_slug = f, sl
                 break
-    if not found or not found_slug:
-        await status.edit_text(
-            "Хм, по этой ссылке запуск в API PH не нашёлся.\n\n"
-            "Варианты:\n"
-            "• это coming-soon / запуск ещё не опубликован — пришли ссылку позже, "
-            "когда запуск станет публичным (радар включится сам)\n"
-            "• ссылка не из producthunt.com\n\n"
-            "Пока могу бесплатно проверить страницу: просто пришли её ещё раз "
-            "без /dayx 🙂"
-        )
+    is_premium = _radar_gate(uid)
+    if found:
+        post, comments = await dayx.fetch_launch(found_slug) or (found, [])
+        if post:
+            state = dayx.load_state()
+            state[found_slug] = {
+                "chat_id": uid,
+                "name": post.get("name"),
+                "tagline": (post.get("tagline") or "")[:200],
+                "seen": [c["id"] for c in comments],
+                "added_at": time.time(),
+                "last_summary": time.time(),
+                "last_free_status": time.time(),
+                "last_wait": time.time(),
+                "seen_live": False,
+                "finished": False,
+            }
+            dayx.save_state(state)
+        live = (post.get("featuredAt") or post.get("createdAt") or "")[:16].replace("T", " ")
+        live_note = "" if post.get("featuredAt") else T(uid, "live_note")
+        analysis = analyze_ph_api(found, uid)
+        conn_key = "dayx_connected_full" if is_premium else "dayx_connected_free"
+        body = (analysis + "\n\n"
+                + T(uid, conn_key, live=live, live_note=live_note,
+                    votes=post.get("votesCount", 0) or 0,
+                    comments=post.get("commentsCount", 0) or 0)
+                + "\n\n"
+                + (T(uid, "cta_premium_note") if is_premium else T(uid, "cta_pay")))
+        kb = _client_kb(uid) if is_premium else _pay_kb(uid)
+        await status.edit_text(body, reply_markup=kb)
         return
-
-    post, comments = await dayx.fetch_launch(found_slug)
-    if post is None:
-        await status.edit_text("Не смог открыть запуск. Проверь ссылку и пришли ещё раз.")
+    hit = await algolia_lookup(slugs[0]) if slugs else None
+    if hit:
+        await status.edit_text(analyze_ph_live(hit, uid) + "\n\n" + T(uid, "not_found_api"),
+                               reply_markup=_client_kb(uid) if is_premium else _pay_kb(uid))
         return
-
-    state = dayx.load_state()
-    state[found_slug] = {
-        "chat_id": uid,
-        "name": post.get("name"),
-        "tagline": (post.get("tagline") or "")[:200],
-        "seen": [c["id"] for c in comments],
-        "added_at": time.time(),
-        "last_summary": time.time(),
-        "last_wait": time.time(),
-        "seen_live": False,
-        "finished": False,
-    }
-    dayx.save_state(state)
-    live = (post.get("featuredAt") or post.get("createdAt") or "")[:16].replace("T", " ")
-    await status.edit_text(
-        f"✅ «{post.get('name')}» подключён к радару.\n\n"
-        f"Сейчас: {post.get('votesCount')} голосов, {post.get('commentsCount')} комментариев.\n"
-        f"Запуск: {live} UTC.\n\n"
-        "Как работает:\n"
-        "• новый комментарий → я пишу ответ под твой продукт и шлю его сюда\n"
-        "• ты: долгое нажатие → копировать → вставить в поле комментария PH → отправить\n"
-        "• каждые 2 часа — сводка (голоса / комментарии / позиция дня)\n"
-        "• конец дня запуска — финальный отчёт"
-    )
+    await status.edit_text(T(uid, "not_found"),
+                           reply_markup=_client_kb(uid) if is_premium else _pay_kb(uid))
 
 
 @router.message(F.text.regexp(r"https?://\S+"))
 async def handle_link(message: Message) -> None:
+    """Прямая ссылка (без нажатия «День X»): PH-запуск -> тот же связанный флоу."""
     url = re.search(r"https?://\S+", message.text).group(0)
-    is_ph = "producthunt.com" in url
-
-    if message.from_user.id in CHECK_WAIT:
-        CHECK_WAIT.pop(message.from_user.id, None)
-        if not is_ph:
-            await message.answer(
-                "Бесплатная проверка — только для продуктов, которые уже на Product Hunt. "
-                "Пришли ссылку вида https://www.producthunt.com/posts/твой-продукт 🙂"
-            )
-            return
-
-    if is_ph:
-        # каскад: официальный API (мгновенно) -> открытый поиск (мгновенно)
-        #         -> веб-архив (2-4 мин) -> вопросы
-        status = await message.answer("🔎 Ищу ваш продукт в официальном API Product Hunt...")
-        slugs = ph_slug_from_url(url)
-        found = None
-        async with httpx.AsyncClient(timeout=25) as api_client:
-            for sl in slugs:
-                found = await ph_api_lookup(api_client, sl)
-                if found:
-                    break
-        if found:
-            await status.edit_text(analyze_ph_api(found), reply_markup=_client_kb(message.from_user.id))
-            return
-        hit = await algolia_lookup(slugs[0]) if slugs else None
-        if hit:
-            await status.edit_text(analyze_ph_live(hit), reply_markup=_client_kb(message.from_user.id))
-            return
-        await status.edit_text(
-            "📡 Продукта ещё нет в публичном поиске PH (coming soon / не фичерен).\n"
-            "Снимаю свежую копию страницы через открытый веб-архив... (до 4 минут)"
-        )
-        html, source = await fetch_page(url)
-        if html is None:
-            QUIZ[message.from_user.id] = {"stage": 0}
-            await status.edit_text(QUIZ_INTRO)
-            return
-        text = analyze(html, url) + _source_note(source)
-        await status.edit_text(text, reply_markup=_client_kb(message.from_user.id))
+    uid = message.from_user.id
+    if "producthunt.com" not in url:
+        await message.answer(T(uid, "link_only_ph"))
         return
-
-    status = await message.answer("🤔 Открываю страницу и смотрю... (до минуты)")
-    html, source = await fetch_page(url)
-    if html is None:
-        QUIZ[message.from_user.id] = {"stage": 0}
-        await status.edit_text(QUIZ_INTRO)
-        return
-    text = analyze(html, url) + _source_note(source)
-    await status.edit_text(text, reply_markup=_client_kb(message.from_user.id))
+    await _connect_launch(uid, url, message)
 
 
 @router.message(F.text)
@@ -1350,7 +1237,7 @@ async def handle_other(message: Message) -> None:
     if _is_admin(message.from_user.id):
         await message.answer("Ты админ: все действия — кнопками (⚙️ Админ). Текст я понимаю только в режимах админки.")
         return
-    await message.answer(NOT_A_LINK)
+    await message.answer(T(message.from_user.id, "not_a_link"))
 
 # ---------- старт (v0.1.5: свой поллинг + «watchdog») ----------
 # Бесплатная песочница «засыпает», когда никто не работает: сокет до Telegram
@@ -1397,6 +1284,44 @@ def _save_offset(update_id: int) -> None:
         pass
 
 
+# ---------- «маяк» живости (v0.6.1): бот каждые 60 с пишет state/heartbeat.txt ----------
+# Кeeper (bot-keeper.yml) смотрит маяк: нет свежей метки или поллинг молчит —
+# он убивает «заснувший» ран и запускает новый. Самодиагностика 24/7 без логов.
+GH_API = "https://api.github.com"
+RUN_ID = os.environ.get("GITHUB_RUN_ID", "local")
+POLL = {"last_ok": 0.0}  # время последнего успешного getUpdates (0 = ещё не было)
+
+
+async def heartbeat_loop() -> None:
+    """Каждые 60 с: state/heartbeat.txt = 'epoch|run_id|poll_age_s'."""
+    while True:
+        await asyncio.sleep(60)
+        if not (GH_TOKEN and REPO_SLUG):
+            continue
+        try:
+            poll_age = int(time.time() - POLL["last_ok"]) if POLL["last_ok"] else -1
+            hb = f"{int(time.time())}|{RUN_ID}|{poll_age}\n"
+            h = {"Authorization": f"Bearer {GH_TOKEN}", "Accept": "application/vnd.github+json"}
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(
+                    f"{GH_API}/repos/{REPO_SLUG}/contents/state/heartbeat.txt?ref=state",
+                    headers=h,
+                )
+                sha = (r.json() or {}).get("sha") if r.status_code == 200 else None
+                payload = {
+                    "message": "hb", "branch": "state",
+                    "content": base64.b64encode(hb.encode()).decode(),
+                }
+                if sha:
+                    payload["sha"] = sha
+                await c.put(
+                    f"{GH_API}/repos/{REPO_SLUG}/contents/state/heartbeat.txt",
+                    headers=h, json=payload,
+                )
+        except Exception as e:
+            print("heartbeat err:", repr(e), flush=True)
+
+
 async def resilient_polling(bot: Bot) -> None:
     state = {"last_ok": datetime.now(timezone.utc), "grace": timedelta(0)}
     stop_wd = asyncio.Event()
@@ -1424,6 +1349,7 @@ async def resilient_polling(bot: Bot) -> None:
         while True:
             try:
                 updates = await bot.get_updates(offset=offset, timeout=10)
+                POLL["last_ok"] = time.time()
                 state["last_ok"] = datetime.now(timezone.utc)
                 state["grace"] = timedelta(0)
                 backoff = 1.0
@@ -1449,12 +1375,30 @@ async def resilient_polling(bot: Bot) -> None:
 
 async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
-    await bot.set_my_commands([
+    cmds = [
         BotCommand(command="start", description="Старт — бесплатная проверка + гайд"),
         BotCommand(command="dayx", description="Радар на день запуска (платный)"),
-    ])
-    me = await bot.me()
-    print(f"🤖 Бот @{me.username} запущен (v0.4.0: радар-only, оплата TON, автоподключение)", flush=True)
+    ]
+    # Старт с ретраями: если Telegram «не слышен» (плохая машина/сеть) — не висеть,
+    # а переждать 5 раз; не помогло — умереть, и keeper поднимет на другой машине.
+    me = None
+    for attempt in range(5):
+        try:
+            await asyncio.wait_for(bot.set_my_commands(cmds), timeout=60)
+            me = await asyncio.wait_for(bot.me(), timeout=60)
+            break
+        except Exception as e:
+            print(f"⚠️ старт: попытка {attempt + 1}/5 не удалась: {e!r}", flush=True)
+            try:
+                await bot.session.close()
+            except Exception:
+                pass
+            await asyncio.sleep(20)
+    if me is None:
+        print("🛑 старт: Telegram не отвечает — выхожу (keeper перезапустит меня)", flush=True)
+        raise SystemExit(1)
+    print(f"🤖 Бот @{me.username} запущен (v0.7.0: День X связанный флоу, i18n, маяк живости)", flush=True)
+    asyncio.create_task(heartbeat_loop())
     asyncio.create_task(dayx.dayx_poller(bot))
     asyncio.create_task(orders_poller(bot))
     await resilient_polling(bot)

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+users.json
+dayx.json
+state_offset.txt
+.env
