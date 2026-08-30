@@ -30,8 +30,10 @@ TTL_MS = 3 * 86400 * 1000  # заказ живёт 3 дня
 ORDER_PREFIX = "lp:"
 
 
-def http(url, data=None, token=None):
+def http(url, data=None, token=None, method=None):
     req = urllib.request.Request(url)
+    if method:
+        req.method = method  # contents API требует PUT, а urllib по умолчанию шлёт POST
     headers = {"Content-Type": "application/json", "User-Agent": "launchpilot-verifier"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -65,7 +67,7 @@ def gh_write(path, text, sha, msg):
     }
     if sha:
         payload["sha"] = sha
-    st, body = http(f"{BASE}/{path}", payload, token=GH_TOKEN)
+    st, body = http(f"{BASE}/{path}", payload, token=GH_TOKEN, method="PUT")
     if st not in (200, 201):
         print(f"WRITE FAIL {path}: {st} {body[:200]}")
         return False
