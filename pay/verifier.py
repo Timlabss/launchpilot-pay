@@ -37,6 +37,8 @@ def http(url, data=None, token=None, method=None):
     headers = {"Content-Type": "application/json", "User-Agent": "launchpilot-verifier"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    for k, v in headers.items():  # ВАЖНО: хедеры реально навешиваются на запрос
+        req.add_header(k, v)
     body = json.dumps(data).encode() if data is not None else None
     try:
         with urllib.request.urlopen(req, data=body, timeout=30) as r:
