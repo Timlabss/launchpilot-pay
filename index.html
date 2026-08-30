@@ -63,6 +63,16 @@
   .to-addr { font-size: 11px; color: #566a8e; margin-top: 14px; word-break: break-all; line-height: 1.4; }
   .badge { display: inline-block; background: #1f2a44; color: #7fd4a8; border: 1px solid #2c3a5c;
     border-radius: 8px; padding: 3px 10px; font-size: 12px; margin-top: 10px; }
+  .manual { text-align: left; margin-top: 4px; }
+  .m-title { font-size: 13px; font-weight: 600; color: #eef2f8; line-height: 1.4; margin-bottom: 8px; }
+  .mrow { display: flex; align-items: center; gap: 8px; background: #10182a; border: 1px solid #232e47;
+    border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+  .mlab { font-size: 12px; color: #6f82a3; min-width: 92px; }
+  .mval { flex: 1; font-size: 13px; color: #eef2f8; word-break: break-all; font-family: inherit; }
+  .copybtn { flex-shrink: 0; background: #1f2a44; color: #9db4d8; border: 1px solid #33415f;
+    border-radius: 8px; font-size: 12px; padding: 7px 10px; cursor: pointer; }
+  .copybtn:active { background: #2a3a5f; }
+  .m-note { font-size: 12px; color: #6f82a3; line-height: 1.45; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -76,13 +86,22 @@
     <div class="note">
       Сумма зафиксирована в заказе — при подтверждении в кошельке уйдёт <b>ровно она</b>.<br>
       Комиссия сети ≈ 0,05 TON списывается кошельком отдельно (кошелёк покажет итог).<br>
-      Метка заказа к переводу прикрепляется автоматически — ничего вписывать не надо.
+      <b>Комментарий</b> из блока ниже впиши, только если платишь вручную.
     </div>
     <div class="divider"></div>
     <span class="badge">сеть TON · Tonkeeper / MyTonWallet / любой</span>
     <div id="connect"></div>
     <button class="pay" id="pay" disabled>Оплатить</button>
     <div id="status"></div>
+    <div class="divider"></div>
+    <div class="manual">
+      <div class="m-title">📱 Кошелёк не коннектится? Оплати вручную — так работает любой, включая Telegram Wallet</div>
+      <div class="mrow"><span class="mlab">1. Адрес</span><span class="mval" id="m-addr"></span><button class="copybtn" id="c-addr">копировать</button></div>
+      <div class="mrow"><span class="mlab">2. Сумма</span><span class="mval" id="m-ton"></span><button class="copybtn" id="c-ton">копировать</button></div>
+      <div class="mrow"><span class="mlab">3. Комментарий</span><span class="mval" id="m-cmt"></span><button class="copybtn" id="c-cmt">копировать</button></div>
+      <button class="ghost" id="sent">✅ Я перевёл — проверь сеть</button>
+      <div class="m-note">В Telegram Wallet: «Перевести» → вставить адрес → вставить сумму → вставить комментарий → подтвердить. Платёж найдём сами, радар включится автоматически.</div>
+    </div>
   </div>
   <div id="bad-block" style="display:none">
     <div class="note">
@@ -98,7 +117,7 @@
   var tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
 
-  var CASH = 'UQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDVwUk';
+  var CASH = 'EQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDV1jh';
   var FEE_NANO = 50000000n; // 0,05 TON на комиссию сети
   var RPC = 'https://toncenter.com/api/v2/jsonRPC';
   var TXS = 'https://toncenter.com/api/v2/getTransactions';
@@ -127,6 +146,32 @@
   if (TITLE) document.getElementById('plan').textContent = TITLE;
   if (TON) document.getElementById('price').textContent = TON + ' TON';
 
+  // ручной перевод: адрес / сумма / комментарий + копирование
+  document.getElementById('m-addr').textContent = CASH;
+  document.getElementById('m-ton').textContent = (TON || '?') + ' TON';
+  document.getElementById('m-cmt').textContent = 'lp:' + OID;
+  function bindCopy(id, val) {
+    var btn = document.getElementById(id);
+    btn.onclick = function () {
+      var done = function () { btn.textContent = '✓ готово'; setTimeout(function () { btn.textContent = 'копировать'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(done).catch(done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = val; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta); done();
+      }
+    };
+  }
+  bindCopy('c-addr', CASH);
+  bindCopy('c-ton', TON || '');
+  bindCopy('c-cmt', 'lp:' + OID);
+  document.getElementById('sent').onclick = function () {
+    setSt('', 'Проверяю сеть на твой перевод…');
+    watchPayment();
+  };
+
   function fmtT(bn) { try { return (Number(bn.toString()) / 1e9).toFixed(2).replace(/\.00$/, ''); } catch (e) { return '?'; } }
   function setSt(cls, text) { st.className = cls; st.textContent = text; }
 
@@ -152,7 +197,7 @@
 
   function refresh() {
     payBtn.disabled = true;
-    if (!wallet) { setSt('', 'Выбери кошелёк — кнопка слева сверху «Подключить». Подойдёт Tonkeeper.'); return; }
+    if (!wallet) { setSt('', 'Выбери кошелёк («Подключить» выше) — или оплати вручную, блок ниже.'); return; }
     if (!BAL) { setSt('', 'Проверяю баланс кошелька…'); return; }
     var need = BigInt(NANO);
     if (BAL < need + FEE_NANO) {
