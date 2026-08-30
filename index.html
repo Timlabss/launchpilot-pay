@@ -6,8 +6,6 @@
 <meta name="theme-color" content="#0f1420">
 <title>Launch Pilot — Оплата</title>
 <script src="vendor/telegram-web-app.js"></script>
-<script src="vendor/tonweb.js"></script>
-<script src="vendor/tonconnect-ui.min.js"></script>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -36,13 +34,18 @@
   .note { font-size: 13px; color: #6f82a3; line-height: 1.45; margin-top: 12px; }
   .note b { color: #9db4d8; }
   .divider { height: 1px; background: #232e47; margin: 16px 0; }
-  #connect { margin: 6px 0 2px; }
-  #connect button {
-    width: 100%;
-    background: #1f2a44 !important; color: #eef2f8 !important;
-    border: 1px solid #33415f !important; border-radius: 12px !important;
-    font-size: 15px !important; padding: 13px !important;
+  .waddr { font-size: 12px; color: #6f82a3; margin-top: 10px; word-break: break-all; }
+  .waddr b { color: #9db4d8; font-weight: 600; }
+  .bal {
+    margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+    background: #10182a; border: 1px solid #232e47;
+    font-size: 14px; line-height: 1.45; color: #eef2f8; text-align: left;
   }
+  .bal.ok { border-color: #2f6b4f; background: #12241d; }
+  .bal.low { border-color: #7a3b3b; background: #241414; }
+  .bal.unknown { border-color: #7a6a3b; background: #221e12; }
+  .bal .big { font-size: 16px; font-weight: 700; }
+  .bal .hint { font-size: 12px; color: #9db4d8; margin-top: 6px; line-height: 1.4; }
   button.pay {
     width: 100%; margin-top: 14px;
     background: #3d9bff; color: #fff; border: 0; border-radius: 14px;
@@ -56,6 +59,13 @@
     background: transparent; color: #9db4d8; border: 1px solid #2c3a5c; border-radius: 14px;
     font-size: 14px; padding: 12px; cursor: pointer;
   }
+  .chips { display: flex; gap: 6px; margin-top: 10px; }
+  .chip {
+    flex: 1; background: #10182a; border: 1px solid #232e47; border-radius: 10px;
+    padding: 8px 6px; font-size: 11px; color: #9db4d8; cursor: pointer; text-align: center;
+  }
+  .chip b { display: block; font-size: 12px; color: #eef2f8; margin-bottom: 2px; font-weight: 600; }
+  .chips-title { font-size: 11px; color: #566a8e; margin-top: 10px; }
   #status { font-size: 14px; margin-top: 12px; min-height: 20px; color: #9db4d8; line-height: 1.4; }
   #status.ok { color: #7fd4a8; }
   #status.bad { color: #f08c8c; }
@@ -63,16 +73,6 @@
   .to-addr { font-size: 11px; color: #566a8e; margin-top: 14px; word-break: break-all; line-height: 1.4; }
   .badge { display: inline-block; background: #1f2a44; color: #7fd4a8; border: 1px solid #2c3a5c;
     border-radius: 8px; padding: 3px 10px; font-size: 12px; margin-top: 10px; }
-  .manual { text-align: left; margin-top: 4px; }
-  .m-title { font-size: 13px; font-weight: 600; color: #eef2f8; line-height: 1.4; margin-bottom: 8px; }
-  .mrow { display: flex; align-items: center; gap: 8px; background: #10182a; border: 1px solid #232e47;
-    border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
-  .mlab { font-size: 12px; color: #6f82a3; min-width: 92px; }
-  .mval { flex: 1; font-size: 13px; color: #eef2f8; word-break: break-all; font-family: inherit; }
-  .copybtn { flex-shrink: 0; background: #1f2a44; color: #9db4d8; border: 1px solid #33415f;
-    border-radius: 8px; font-size: 12px; padding: 7px 10px; cursor: pointer; }
-  .copybtn:active { background: #2a3a5f; }
-  .m-note { font-size: 12px; color: #6f82a3; line-height: 1.45; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -84,29 +84,29 @@
     <div class="price" id="price">— TON</div>
     <div class="usd" id="usd">≈ $19</div>
     <div class="note">
-      Сумма зафиксирована в заказе — при подтверждении в кошельке уйдёт <b>ровно она</b>.<br>
-      Комиссия сети ≈ 0,05 TON списывается кошельком отдельно (кошелёк покажет итог).<br>
-      <b>Комментарий</b> из блока ниже впиши, только если платишь вручную.
+      Сумма зафиксирована в заказе — уйдёт <b>ровно она</b>.<br>
+      Комиссия сети ≈ 0,05 TON — кошелёк покажет итог.
     </div>
-    <div class="divider"></div>
-    <span class="badge">сеть TON · Tonkeeper / MyTonWallet / любой</span>
-    <div id="connect"></div>
-    <button class="pay" id="pay" disabled>Оплатить</button>
+    <div class="waddr" id="waddr"></div>
+    <div class="bal" id="bal" style="display:none">
+      <div class="big" id="bal-big">Проверяю баланс…</div>
+      <div class="hint" id="bal-hint"></div>
+    </div>
+    <span class="badge">сеть TON · работает с любым кошельком, включая Telegram Wallet</span>
+    <button class="pay" id="pay" disabled>Перевести</button>
+    <div class="chips-title" id="chips-title" style="display:none">кошелёк не открылся? вставь вручную:</div>
+    <div class="chips" id="chips" style="display:none">
+      <div class="chip" id="c-addr"><b>адрес</b>копировать</div>
+      <div class="chip" id="c-ton"><b>сумма</b>копировать</div>
+      <div class="chip" id="c-cmt"><b>комментарий</b>копировать</div>
+    </div>
+    <button class="ghost" id="recheck" style="display:none">🔄 Проверить баланс ещё раз</button>
     <div id="status"></div>
-    <div class="divider"></div>
-    <div class="manual">
-      <div class="m-title">📱 Кошелёк не коннектится? Оплати вручную — так работает любой, включая Telegram Wallet</div>
-      <div class="mrow"><span class="mlab">1. Адрес</span><span class="mval" id="m-addr"></span><button class="copybtn" id="c-addr">копировать</button></div>
-      <div class="mrow"><span class="mlab">2. Сумма</span><span class="mval" id="m-ton"></span><button class="copybtn" id="c-ton">копировать</button></div>
-      <div class="mrow"><span class="mlab">3. Комментарий</span><span class="mval" id="m-cmt"></span><button class="copybtn" id="c-cmt">копировать</button></div>
-      <button class="ghost" id="sent">✅ Я перевёл — проверь сеть</button>
-      <div class="m-note">В Telegram Wallet: «Перевести» → вставить адрес → вставить сумму → вставить комментарий → подтвердить. Платёж найдём сами, радар включится автоматически.</div>
-    </div>
   </div>
   <div id="bad-block" style="display:none">
     <div class="note">
       Эта ссылка создаётся в боте: открой <b>@PHlaunchpilot_bot</b>, нажми «💳 Оплатить» —
-      бот выдаст личную ссылку оплаты.
+      бот выдаст личный экран оплаты.
     </div>
   </div>
   <button class="ghost" id="tobot">← Назад в бот</button>
@@ -118,12 +118,12 @@
   if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
 
   var CASH = 'EQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDV1jh';
-  var FEE_NANO = 50000000n; // 0,05 TON на комиссию сети
-  var RPC = 'https://toncenter.com/api/v2/jsonRPC';
+  var FEE_NANO = 50000000n; // 0,05 TON комиссия
   var TXS = 'https://toncenter.com/api/v2/getTransactions';
 
   var P = new URLSearchParams(location.search);
-  var OID = P.get('o'), TITLE = P.get('t'), TON = P.get('ton'), NANO = P.get('n'), CREATED = Number(P.get('m') || 0);
+  var OID = P.get('o'), TITLE = P.get('t'), TON = P.get('ton'), NANO = P.get('n');
+  var CREATED = Number(P.get('m') || 0), WALLET = P.get('w') || '';
 
   document.getElementById('cash').textContent = CASH;
   var orderOk = !!(OID && NANO && /^\d+$/.test(NANO));
@@ -131,6 +131,9 @@
   var badBlock = document.getElementById('bad-block');
   var st = document.getElementById('status');
   var payBtn = document.getElementById('pay');
+  var balBox = document.getElementById('bal');
+  var balBig = document.getElementById('bal-big');
+  var balHint = document.getElementById('bal-hint');
 
   document.getElementById('tobot').onclick = function () {
     if (tg && tg.openTelegramLink) { try { tg.openTelegramLink('https://t.me/PHlaunchpilot_bot'); return; } catch (e) {} }
@@ -144,19 +147,105 @@
   }
   orderBlock.style.display = 'block';
   if (TITLE) document.getElementById('plan').textContent = TITLE;
-  if (TON) document.getElementById('price').textContent = TON + ' TON';
+  if (TON) {
+    document.getElementById('price').textContent = TON + ' TON';
+    payBtn.textContent = '📤 Перевести ' + TON + ' TON';
+  }
+  if (WALLET) {
+    document.getElementById('waddr').innerHTML = 'Кошелёк: <b>' + WALLET.slice(0, 10) + '…' + WALLET.slice(-8) + '</b>';
+  } else {
+    document.getElementById('waddr').innerHTML = 'Адрес кошелька пришлёшь боту — он откроет этот экран с проверкой баланса.';
+  }
 
-  // ручной перевод: адрес / сумма / комментарий + копирование
-  document.getElementById('m-addr').textContent = CASH;
-  document.getElementById('m-ton').textContent = (TON || '?') + ' TON';
-  document.getElementById('m-cmt').textContent = 'lp:' + OID;
-  function bindCopy(id, val) {
-    var btn = document.getElementById(id);
-    btn.onclick = function () {
-      var done = function () { btn.textContent = '✓ готово'; setTimeout(function () { btn.textContent = 'копировать'; }, 1500); };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(val).then(done).catch(done);
+  function setSt(cls, text) { st.className = cls; st.textContent = text; }
+  function fmtT(bn) { try { return (Number(bn.toString()) / 1e9).toFixed(2).replace(/\.00$/, ''); } catch (e) { return '?'; } }
+
+  // ---- баланс кошелька: полная история транзакций -> in - out ----
+  // (getBalance в toncenter не отдаётся, история — надёжный путь)
+  async function walletBalance(addr) {
+    var txs = [], cursor = null, pages = 0, complete = false;
+    while (pages < 10) {
+      pages++;
+      var body = { address: addr, limit: 100 };
+      if (cursor) body.end_utime = cursor;
+      var arr;
+      try {
+        var r = await fetch(TXS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        arr = ((await r.json()) || {}).result || [];
+      } catch (e) { return { state: 'unknown' }; }
+      if (!arr.length) { complete = true; break; }
+      for (var i = 0; i < arr.length; i++) txs.push(arr[i]);
+      if (arr.length < 100) { complete = true; break; }
+      cursor = Number(arr[arr.length - 1].utime) - 1;
+      await new Promise(function (res) { setTimeout(res, 1800); });
+    }
+    if (!complete) return { state: 'unknown' };
+    var bal = 0n;
+    for (var k = 0; k < txs.length; k++) {
+      if (txs[k].in_msg) bal += BigInt(txs[k].in_msg.value || 0);
+      var om = txs[k].out_msgs || [];
+      for (var m = 0; m < om.length; m++) bal -= BigInt(om[m].value || 0);
+    }
+    return { state: 'known', bal: bal < 0n ? 0n : bal };
+  }
+
+  var checking = false;
+  function renderBalance(res) {
+    balBox.style.display = 'block';
+    var need = BigInt(NANO) + FEE_NANO;
+    if (res.state === 'known') {
+      if (res.bal >= need) {
+        balBox.className = 'bal ok';
+        balBig.textContent = '✅ Достаточно: ' + fmtT(res.bal) + ' TON';
+        balHint.textContent = 'Нужно ' + (TON || '?') + ' + 0,05 на комиссию. Жми «Перевести».';
+        payBtn.disabled = false;
       } else {
+        balBox.className = 'bal low';
+        balBig.textContent = '❌ Недостаточно: у тебя ' + fmtT(res.bal) + ' TON';
+        balHint.textContent = 'Нужно ' + (TON || '?') + ' + 0,05 на комиссию. Пополни TON в кошельке (@wallet → «Пополнить» или обмен) — и жми «Проверить ещё раз». Пока кнопка заблокирована, списаний не будет.';
+        payBtn.disabled = true;
+        document.getElementById('recheck').style.display = 'block';
+      }
+    } else {
+      balBox.className = 'bal unknown';
+      balBig.textContent = '⚠️ Баланс не проверить (сеть)';
+      balHint.textContent = 'Не страшно: кошелёк сам проверит баланс, когда ты нажмёшь «Перевести». Если не хватит — он просто не даст подтвердить.';
+      payBtn.disabled = false;
+      document.getElementById('recheck').style.display = 'block';
+    }
+  }
+
+  async function checkBalance() {
+    if (checking || !WALLET) return;
+    checking = true;
+    payBtn.disabled = true;
+    balBox.style.display = 'block';
+    balBox.className = 'bal';
+    balBig.textContent = 'Проверяю баланс…';
+    balHint.textContent = 'Считаю по транзакциям кошелька в сети TON.';
+    var res = await walletBalance(WALLET);
+    checking = false;
+    renderBalance(res);
+  }
+  document.getElementById('recheck').onclick = checkBalance;
+
+  // ---- перевод: pre-filled deep link ton:// (адрес + сумма + комментарий) ----
+  var deepLink = 'ton://transfer/' + CASH + '?amount=' + NANO + '&text=' + encodeURIComponent('lp:' + OID);
+  payBtn.onclick = function () {
+    payBtn.disabled = true;
+    document.getElementById('chips-title').style.display = 'block';
+    document.getElementById('chips').style.display = 'flex';
+    setSt('', 'Открываю кошелёк с готовым переводом… Подтверди в нём. Если окно не открылось — вставь значения чипами ниже в свой кошелёк (@wallet → «Перевести»).');
+    try { location.href = deepLink; } catch (e) {}
+    watchPayment();
+  };
+
+  function bindCopy(id, val) {
+    var el = document.getElementById(id);
+    el.onclick = function () {
+      var done = function () { el.lastChild.textContent = '✓ готово'; setTimeout(function () { el.lastChild.textContent = 'копировать'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(val).then(done).catch(done);
+      else {
         var ta = document.createElement('textarea');
         ta.value = val; document.body.appendChild(ta); ta.select();
         try { document.execCommand('copy'); } catch (e) {}
@@ -167,74 +256,8 @@
   bindCopy('c-addr', CASH);
   bindCopy('c-ton', TON || '');
   bindCopy('c-cmt', 'lp:' + OID);
-  document.getElementById('sent').onclick = function () {
-    setSt('', 'Проверяю сеть на твой перевод…');
-    watchPayment();
-  };
 
-  function fmtT(bn) { try { return (Number(bn.toString()) / 1e9).toFixed(2).replace(/\.00$/, ''); } catch (e) { return '?'; } }
-  function setSt(cls, text) { st.className = cls; st.textContent = text; }
-
-  function rpc(method, params) {
-    return fetch(RPC, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params })
-    }).then(function (r) { return r.json(); })
-      .then(function (j) { if (j.error) throw new Error(j.error.message || 'rpc error'); return j.result; });
-  }
-  function balOf(addrStr) {
-    var a = new TonWeb.utils.Address(addrStr);
-    return rpc('getBalance', { address: a.toString(false), mode: 0 })
-      .then(function (res) { return new TonWeb.utils.BN(res.balance); });
-  }
-
-  var BAL = null;
-  var wallet = null;
-  var ui = new TON_CONNECT_UI.TonConnectUI({
-    manifestUrl: 'tonconnect-manifest.json',
-    buttonRootId: 'connect'
-  });
-
-  function refresh() {
-    payBtn.disabled = true;
-    if (!wallet) { setSt('', 'Выбери кошелёк («Подключить» выше) — или оплати вручную, блок ниже.'); return; }
-    if (!BAL) { setSt('', 'Проверяю баланс кошелька…'); return; }
-    var need = BigInt(NANO);
-    if (BAL < need + FEE_NANO) {
-      setSt('bad', 'Не хватает: у тебя ' + fmtT(BAL) + ' TON, нужно ' + (TON || '?') + ' + 0,05 на комиссию. Докинь TON в кошельке (обмен прямо внутри) — и жми снова. Пока кнопка заблокирована, списаний не будет.');
-      return;
-    }
-    setSt('ok', 'Баланс в порядке. Жми «Оплатить» — кошелёк попросит подтвердить ровно ' + (TON || '?') + ' TON.');
-    payBtn.disabled = false;
-  }
-
-  ui.onStatusChange(function (w) {
-    wallet = w || null;
-    BAL = null;
-    refresh();
-    if (wallet) {
-      balOf(wallet.account.address).then(function (b) { BAL = b; refresh(); })
-        .catch(function () { setSt('warn', 'Не удалось проверить баланс (сеть). Всё равно можно попробовать нажать «Оплатить».'); payBtn.disabled = false; });
-    }
-  });
-
-  function commentCell(id) {
-    var c = new TonWeb.boc.Cell();
-    var txt = ('lp:' + id).slice(0, 32);
-    try {
-      var bits = '';
-      for (var i = 0; i < 32; i++) bits += '0';
-      for (var j = 0; j < 32; j++) {
-        var code = j < txt.length ? txt.charCodeAt(j) : 0;
-        bits += code.toString(2).padStart(8, '0');
-      }
-      c.bits.writeBits(bits);
-    } catch (e) {
-      try { c.bits.writeUint(0, 32); c.bits.writeString(txt); } catch (e2) {}
-    }
-    return c;
-  }
-
+  // ---- автопроверка сети: точная сумма + время ----
   var polling = false;
   function watchPayment() {
     if (polling) return;
@@ -243,10 +266,7 @@
     var timer = setInterval(async function () {
       tries++;
       try {
-        var r = await fetch(TXS, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: CASH, limit: 15 })
-        });
+        var r = await fetch(TXS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address: CASH, limit: 15 }) });
         var j = await r.json();
         var txs = (j && j.result) || [];
         for (var i = 0; i < txs.length; i++) {
@@ -256,7 +276,6 @@
           if (CREATED && tx.utime < CREATED / 1000 - 300) continue;
           clearInterval(timer);
           setSt('ok', '✅ Платёж подтверждён! Бот включает радар — возвращаюсь в чат…');
-          payBtn.disabled = true;
           if (tg && tg.close) setTimeout(function () { try { tg.close(); } catch (e) {} }, 1600);
           return;
         }
@@ -264,37 +283,14 @@
       if (tries >= 60) {
         clearInterval(timer);
         polling = false;
-        setSt('warn', 'Сеть отвечает медленно. Не переживай: бот сам проверяет платёж и включит радар. Просто оставайся в чате с ботом.');
+        setSt('warn', 'Сеть отвечает медленно. Не переживай: бот сам проверяет платёж и включит радар. Просто оставайся в чате.');
       } else if (tries % 4 === 0) {
         setSt('', 'Ищу перевод в сети… (' + Math.min(tries * 5, 300) + ' сек)');
       }
     }, 5000);
   }
 
-  payBtn.onclick = async function () {
-    payBtn.disabled = true;
-    try {
-      setSt('', 'Проверяю баланс…');
-      var b = await balOf(wallet.account.address);
-      if (b < BigInt(NANO) + FEE_NANO) { refresh(); return; }
-      setSt('', 'Готовлю перевод…');
-      var c = commentCell(OID);
-      var boc = await c.toBoc();
-      var payload = TonWeb.utils.bytesToBase64(boc);
-      setSt('', 'Подтверди перевод в кошельке…');
-      await ui.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{ address: CASH, amount: NANO, payload: payload }]
-      });
-      document.getElementById('connect').style.display = 'none';
-      payBtn.style.display = 'none';
-      setSt('', 'Перевод улетел! Проверяю сеть…');
-      watchPayment();
-    } catch (e) {
-      setSt('bad', 'Отменено или отклонено кошельком. Можно попробовать ещё раз.');
-      payBtn.disabled = false;
-    }
-  };
+  checkBalance();
 })();
 </script>
 </body>
