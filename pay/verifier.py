@@ -98,12 +98,62 @@ def toncenter_txs(limit=60):
     return j.get("result") or []
 
 
-def comment_of(in_msg):
-    """Текстовая метка перевода, если toncenter её расшифровал (decoded_body)."""
+def _boc_root_bits(boc_b64: str) -> str:
+    """Минимальный разбор BOC -> биты корневого cell (для standard-comment 32+256)."""
+    try:
+        raw = base64.b64decode(boc_b64)
+        if len(raw) < 11 or raw[:4] != b"\xb5\xee\x9c\x72":
+            return ""
+        flags = raw[4]
+        off = 5
+        if flags & 0x01:  # has_dict: known/unknown bits
+            off += 2
+
+        def varint(o: int):
+            v, shift = 0, 0
+            while True:
+                b = raw[o]
+                o += 1
+                v |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    return v, o
+                shift += 7
+
+        cells, off = varint(off)
+        _depth, off = varint(off)
+        if flags & 0x02:  # cell hash size
+            off += 1
+        if not (flags & 0x80):  # root list count
+            off += 1
+        if cells != 1:
+            return ""
+        b0, b1, b2 = raw[off], raw[off + 1], raw[off + 2]
+        size = (b1 << 3) | (b2 >> 5)  # 11-битный размер данных
+        data = raw[off + 3: off + 3 + size]
+        return "".join(f"{byte:08b}" for byte in data)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def comment_of(in_msg) -> str:
+    """Текстовая метка перевода: decoded_body (если отдаёт API) или разбор
+    стандартного комментария (32 бита op=0 + до 256 бит ascii) из msg_data.body."""
     d = in_msg.get("decoded_body")
     if isinstance(d, str) and d:
         return d
-    return ""
+    body = (in_msg.get("msg_data") or {}).get("body") or ""
+    bits = _boc_root_bits(body)
+    if len(bits) < 288:
+        return ""
+    if int(bits[:32], 2) != 0:
+        return ""
+    out = []
+    for i in range(32):
+        byte = int(bits[32 + i * 8: 40 + i * 8], 2)
+        if byte == 0:
+            break
+        out.append(chr(byte))
+    return "".join(out)
 
 
 def find_admin():
@@ -157,9 +207,10 @@ def main():
         txs = toncenter_txs(60)
         for tx in txs[:3]:
             if tx.get("in_msg"):
-                debug.append("TX-DUMP: " + json.dumps(
-                    {"hash": tx.get("hash"), "utime": tx.get("utime"),
-                     "in_msg": tx["in_msg"]}, ensure_ascii=False)[:1500])
+                dump = {"hash": tx.get("hash"), "utime": tx.get("utime"),
+                        "in_msg": tx["in_msg"],
+                        "decoded_comment": comment_of(tx["in_msg"])}
+                debug.append("TX-DUMP: " + json.dumps(dump, ensure_ascii=False)[:1800])
 
         by_nano = {}
         for o in pending:
@@ -194,7 +245,7 @@ def main():
                     target = cands[0]
                     debug.append(f"NO-TAG-FALLBACK: tx {txhash} -> {target.get('id')}")
             if target is None:
-                debug.append(f"AMBIGUOUS: tx {txhash} nano={value} cands={len(cands)} — ждёт админ")
+                debug.append(f"AMBIGUOUS: tx {txhash} nano={value} cands={len(cands)} cmt={cmt!r} — ждёт админ")
                 continue
 
             target["status"] = "paid"
