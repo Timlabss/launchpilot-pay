@@ -180,7 +180,8 @@ def _pay_kb(uid) -> InlineKeyboardMarkup:
     """Кнопки после подключения радара (для не-премиум): оплата + поддержка."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=T(uid, "btn_pay"), callback_data="pay")],
-        [InlineKeyboardButton(text=T(uid, "btn_help"), callback_data="support")],
+        [InlineKeyboardButton(text=T(uid, "btn_help"), callback_data="support"),
+         InlineKeyboardButton(text=T(uid, "btn_back"), callback_data="menu")],
     ])
 
 # ---------- «глаза»: живые слои ----------
@@ -418,8 +419,7 @@ def analyze_ph_api(post: dict, uid) -> str:
     if topics:
         lines.append(T(uid, "an_topics", topics=", ".join(topics)))
     return "\n".join(lines) + T(uid, "score_line",
-                                 now=min(score, 60), prep=min(score + 30, 90),
-                                 note=T(uid, "note_api"))
+                                 now=min(score, 60), note=T(uid, "note_api"))
 
 
 def analyze_ph_live(hit: dict, uid) -> str:
@@ -471,8 +471,7 @@ def analyze_ph_live(hit: dict, uid) -> str:
     if topics:
         lines.append(T(uid, "an_topics", topics=", ".join(topics)))
     return "\n".join(lines) + T(uid, "score_line",
-                                 now=min(score, 60), prep=min(score + 30, 90),
-                                 note=T(uid, "note_live"))
+                                 now=min(score, 60), note=T(uid, "note_live"))
 
 
 def _source_note(source: str) -> str:
@@ -767,13 +766,21 @@ async def cb_lang(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
+@router.callback_query(F.data == "menu")
+async def cb_menu(cb: CallbackQuery) -> None:
+    """«Назад в меню» — главное меню на месте."""
+    uid = cb.from_user.id
+    await cb.message.answer(T(uid, "welcome"), reply_markup=_client_kb(uid))
+    await cb.answer()
+
+
 @router.callback_query(F.data.in_({"radar", "dayx"}))
 async def cb_radar(cb: CallbackQuery) -> None:
     """День X: все сначала присылают ссылку на запуск.
     Диагностика + радар (бесплатно) — сразу; оплата — кнопкой, после результата."""
     uid = cb.from_user.id
     DAYX_WAIT[uid] = True
-    await cb.message.answer(T(uid, "dayx_ask"), reply_markup=_client_kb(uid))
+    await cb.message.answer(T(uid, "dayx_ask"))
     await cb.answer()
 
 
@@ -1075,7 +1082,7 @@ async def cmd_dayx(message: Message) -> None:
     # запасной вход (главный — кнопка «📡 День X»)
     uid = message.from_user.id
     DAYX_WAIT[uid] = True
-    await message.answer(T(uid, "dayx_ask"), reply_markup=_client_kb(uid))
+    await message.answer(T(uid, "dayx_ask"))
 
 
 @router.message(F.text, lambda m: m.from_user.id in ADMIN_MODE)

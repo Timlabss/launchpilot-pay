@@ -110,6 +110,7 @@ TEXTS = {
   "btn_support": "💬 Поддержка",
   "btn_pay": "💳 Полный радар — $19",
   "btn_help": "💬 Не понял — поддержка",
+  "btn_back": "⬅️ В меню",
   "order_creating": "🧾 Создаю заказ...",
   "order_fail": "Не получилось создать заказ (сеть подзадержалась). Попробуй ещё раз через минуту — или нажми 💬 Поддержка.",
   "btn_pay_ton": "💳 Оплатить {ton} TON",
@@ -139,10 +140,7 @@ TEXTS = {
   "an_lang_en": "✅ Текст на английском — правильно для PH",
   "an_lang_other": "⚠️ Текст на другом языке — на PH нужен английский (переведём вместе)",
   "an_already": "ℹ️ Продукт уже на Product Hunt{extra}",
-  "score_line": (
-      "\n📊 Ваш шанс попасть в топ-5 прямо сейчас: ~{now}%\n"
-      "📈 Если подготовимся вместе 6 недель: ~{prep}%\n\n{note}"
-  ),
+  "score_line": "\n📊 Ваш шанс попасть в топ-5 прямо сейчас: ~{now}%\n\n{note}",
   "note_pre": ("(это предварительная оценка по странице — официальный API PH данных по продукту "
                 "пока не отдаёт: продукт не фичерен / новый)"),
   # --- радар (dayx) ---
@@ -273,6 +271,7 @@ TEXTS = {
   "btn_support": "💬 Support",
   "btn_pay": "💳 Full radar — $19",
   "btn_help": "💬 Help — support",
+  "btn_back": "⬅️ Back to menu",
   "order_creating": "🧾 Creating your order...",
   "order_fail": "Couldn't create the order (network lag). Try again in a minute — or press 💬 Support.",
   "btn_pay_ton": "💳 Pay {ton} TON",
@@ -301,10 +300,7 @@ TEXTS = {
   "an_lang_en": "✅ Text is in English — correct for PH",
   "an_lang_other": "⚠️ Text is in another language — PH needs English (we'll translate together)",
   "an_already": "ℹ️ Product is already on Product Hunt{extra}",
-  "score_line": (
-      "\n📊 Your chance of top-5 right now: ~{now}%\n"
-      "📈 If we prepare together for 6 weeks: ~{prep}%\n\n{note}"
-  ),
+  "score_line": "\n📊 Your chance of top-5 right now: ~{now}%\n\n{note}",
   "note_pre": ("(preliminary assessment from the page — the official PH API doesn't have data "
                 "on this product yet: not featured / new)"),
   "wx_wait": "⏳ The launch is not public yet — still watching (every 2 minutes).",
