@@ -732,17 +732,11 @@ RADAR_OFFER = """📡 Радар на день X — 19 долларов
 PAY_TEXT = """🧾 Заказ: Радар на день X — {ton} TON (≈$19)
 
 Жми кнопку — откроется экран оплаты:
-1️⃣ Проверю баланс твоего кошелька (недостаточно — покажу, сколько докинуть)
-2️⃣ Жмёшь «📤 Перевести» — кошелёк открывается уже с адресом, суммой и комментарием, остаётся подтвердить
-3️⃣ Всё: найду платёж в сети и включу радар сам (~5 минут)"""
+1️⃣ Подключи кошелёк (или вставь адрес из @wallet — он запомнится)
+2️⃣ Экран проверит баланс: не хватит — напишет, сколько докинуть
+3️⃣ Жмёшь «📤 Перевести» — кошелёк открывается с готовыми суммой и адресом, ты только подтверждаешь
 
-PAY_ADDR_ASK = """💳 Чтобы открыть оплату, нужен адрес твоего TON-кошелька.
-
-Скопируй его в кошельке (в @wallet: «Скопировать адрес») и отправь сюда сообщением.
-
-Один раз — дальше баланс буду проверять автоматически."""
-
-PAY_ADDR_BAD = "Похоже, это не TON-адрес 🙂\nПришли полный: начинается с UQ или EQ, около 50 символов."
+Дальше я сам найду платёж в сети и включу радар (~5 минут)."""
 
 NOT_A_LINK = "Я понимаю только ссылки 🙂\nПришлите ссылку на ваш продукт в Product Hunt (producthunt.com) — проверю бесплатно."
 
@@ -845,12 +839,6 @@ async def cb_pay(cb: CallbackQuery) -> None:
         )
         await cb.answer()
         return
-    wallet = e.get("wallet", "")
-    if not wallet:
-        PAY_ADDR_WAIT[uid] = True
-        await cb.message.answer(PAY_ADDR_ASK)
-        await cb.answer()
-        return
     await cb.answer()
     await _open_pay_screen(uid, f"@{cb.from_user.username}" if cb.from_user.username else str(uid), cb.message)
 
@@ -867,35 +855,16 @@ async def _open_pay_screen(uid: int, user_ref: str, reply) -> None:
         return
     users = _load_users()
     users[str(uid)]["last_order"] = order["id"]
-    wallet = users[str(uid)].get("wallet", "")
     _save_users(users)
     link = PAY_BASE + "?" + urlencode({
         "o": order["id"], "t": order["title"], "ton": order["ton"],
-        "n": order["nano"], "m": order["created"], "w": wallet,
+        "n": order["nano"], "m": order["created"],
     })
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"💳 Оплатить {order['ton']} TON", web_app=WebAppInfo(url=link))],
         [InlineKeyboardButton(text="💬 Не понял — поддержка", callback_data="support")],
     ])
     await st.edit_text(PAY_TEXT.format(ton=order["ton"]), reply_markup=kb)
-
-
-@router.message(F.text)
-async def pay_addr_message(message: Message) -> None:
-    """Пока ждём адрес кошелька: любое сообщение трактуем как адрес."""
-    uid = message.from_user.id
-    if uid not in PAY_ADDR_WAIT:
-        return
-    txt = (message.text or "").strip()
-    if not re.fullmatch(r"[UEK][A-Za-z0-9]{3}_[A-Za-z0-9_-]{43}", txt):
-        await message.answer(PAY_ADDR_BAD)
-        return
-    PAY_ADDR_WAIT.pop(uid, None)
-    users = _load_users()
-    users[str(uid)]["wallet"] = txt
-    _save_users(users)
-    await message.answer("✅ Кошелёк запомнил. Открываю оплату...")
-    await _open_pay_screen(uid, f"@{message.from_user.username}" if message.from_user.username else str(uid), message)
 
 
 @router.callback_query(F.data == "support")
@@ -1151,7 +1120,6 @@ async def orders_poller(bot: Bot) -> None:
 
 DAYX_WAIT = {}   # chat_id -> True: ждём ссылку на запуск
 CHECK_WAIT = {}  # chat_id -> True: ждём PH-ссылку для бесплатной проверки
-PAY_ADDR_WAIT = {}  # chat_id -> True: ждём адрес TON-кошелька для оплаты
 
 RADAR_ENTRY_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="💳 Оплатить 19 $", callback_data="pay")],
@@ -1326,10 +1294,6 @@ async def handle_dayx_link(message: Message) -> None:
 async def handle_link(message: Message) -> None:
     url = re.search(r"https?://\S+", message.text).group(0)
     is_ph = "producthunt.com" in url
-
-    if message.from_user.id in PAY_ADDR_WAIT:
-        await message.answer(PAY_ADDR_BAD)
-        return
 
     if message.from_user.id in CHECK_WAIT:
         CHECK_WAIT.pop(message.from_user.id, None)
