@@ -1,4 +1,4 @@
-ee": "0", "created_lt": "99339716000002", "body_hash": "lqKW0iTyhcZ77pPDD4owkVfw2qNdxbh+QQt4YwoJz8c=", "msg_data": {"@type": "msg.dataRaw", "body": "te6cckEBAQEAAgAAAEysuc0=", "init_state": ""}, "message": ""}, "decoded_comment": ""}
+yhcZ77pPDD4owkVfw2qNdxbh+QQt4YwoJz8c=", "msg_data": {"@type": "msg.dataRaw", "body": "te6cckEBAQEAAgAAAEysuc0=", "init_state": ""}, "message": ""}, "decoded_comment": ""}
 TX-DUMP: {"hash": null, "utime": 1787754371, "in_msg": {"@type": "ext.message", "hash": "VTrTqnu8BBqhXACd7sxuE+WE2qI/1UcVtu0DT3Cq/5g=", "source": "EQDwuS1akJprHRmqdD3Plbr1UOTqgr573WiaqucaChohUfc7", "destination": "EQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDV1jh", "value": "50000000", "extra_currencies": [], "fwd_fee": "44446", "ihr_fee": "0", "created_lt": "99338597000002", "body_hash": "lqKW0iTyhcZ77pPDD4owkVfw2qNdxbh+QQt4YwoJz8c=", "msg_data": {"@type": "msg.dataRaw", "body": "te6cckEBAQEAAgAAAEysuc0=", "init_state": ""}, "message": ""}, "decoded_comment": ""}
 
 --- 2026-09-02 15:08:42 UTC --- pending=1 txs=7 changed=False
@@ -49,3 +49,5 @@ EXPIRED: lp_6a944cb6yzsy
 --- 2026-09-02 18:47:14 UTC --- pending=0 txs=0 changed=False
 
 --- 2026-09-02 18:55:43 UTC --- pending=0 txs=0 changed=False
+
+--- 2026-09-02 19:04:32 UTC --- pending=0 txs=0 changed=False
