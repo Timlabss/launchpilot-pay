@@ -1,4 +1,4 @@
-ource": "EQDwuS1akJprHRmqdD3Plbr1UOTqgr573WiaqucaChohUfc7", "destination": "EQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDV1jh", "value": "50000000", "extra_currencies": [], "fwd_fee": "44446", "ihr_fee": "0", "created_lt": "99338597000002", "body_hash": "lqKW0iTyhcZ77pPDD4owkVfw2qNdxbh+QQt4YwoJz8c=", "msg_data": {"@type": "msg.dataRaw", "body": "te6cckEBAQEAAgAAAEysuc0=", "init_state": ""}, "message": ""}, "decoded_comment": ""}
+stination": "EQDL_6KhMWWJo7-25Nl8mCkdQZgiyNdgx8PofVZcHESDV1jh", "value": "50000000", "extra_currencies": [], "fwd_fee": "44446", "ihr_fee": "0", "created_lt": "99338597000002", "body_hash": "lqKW0iTyhcZ77pPDD4owkVfw2qNdxbh+QQt4YwoJz8c=", "msg_data": {"@type": "msg.dataRaw", "body": "te6cckEBAQEAAgAAAEysuc0=", "init_state": ""}, "message": ""}, "decoded_comment": ""}
 
 --- 2026-09-02 15:40:52 UTC --- pending=0 txs=0 changed=True
 EXPIRED: lp_6a944cb6yzsy
@@ -178,3 +178,5 @@ EXPIRED: lp_6a944cb6yzsy
 --- 2026-09-03 10:57:42 UTC --- pending=0 txs=0 changed=False
 
 --- 2026-09-03 11:08:45 UTC --- pending=0 txs=0 changed=False
+
+--- 2026-09-03 11:20:34 UTC --- pending=0 txs=0 changed=False
