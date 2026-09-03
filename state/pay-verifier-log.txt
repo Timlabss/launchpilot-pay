@@ -1,6 +1,4 @@
-t_state": ""}, "message": ""}, "decoded_comment": ""}
-
---- 2026-09-02 15:40:52 UTC --- pending=0 txs=0 changed=True
+-09-02 15:40:52 UTC --- pending=0 txs=0 changed=True
 EXPIRED: lp_6a944cb6yzsy
 
 --- 2026-09-02 15:52:25 UTC --- pending=0 txs=0 changed=False
@@ -190,3 +188,5 @@ EXPIRED: lp_6a944cb6yzsy
 --- 2026-09-03 11:58:04 UTC --- pending=0 txs=0 changed=False
 
 --- 2026-09-03 12:12:07 UTC --- pending=0 txs=0 changed=False
+
+--- 2026-09-03 12:31:57 UTC --- pending=0 txs=0 changed=False
